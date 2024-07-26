@@ -1,6 +1,7 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import IntEnum
-from itertools import chain, count, repeat, takewhile
+from itertools import chain, islice, takewhile
 from pathlib import Path
 from typing import Self
 
@@ -21,44 +22,53 @@ class Direction(IntEnum):
 
 @dataclass
 class Tape:
-    blank: str
     _left: list[str]
     _right: list[str]
+    _pos: int
 
-    def __init__(self, blank_symbol: str, input: str) -> None:
-        self.blank = blank_symbol
+    def __init__(self, input: str) -> None:
         self._left = []
         self._right = list(input)
+        self._pos = 0
 
-    def __getitem__(self, pos: int, /) -> str:
-        try:
-            if pos < 0:
-                return self._left[-pos - 1]
-            else:
-                return self._right[pos]
-        except IndexError:
-            return self.blank
-
-    def __setitem__(self, pos: int, symbol: str, /) -> None:
-        if pos < -len(self._left):
-            self._left.extend(repeat(self.blank, -pos - len(self._left)))
-        elif pos >= len(self._right):
-            self._right.extend(repeat(self.blank, pos + 1 - len(self._right)))
-        if pos < 0:
-            self._left[-pos - 1] = symbol
+    def read(self) -> str:
+        if self._pos < 0:
+            return self._left[-self._pos - 1]
         else:
-            self._right[pos] = symbol
+            return self._right[self._pos]
 
-    def configuration(self, state: int, pos: int) -> str:
+    def write(self, symbol: str) -> None:
+        if self._pos < 0:
+            self._left[-self._pos - 1] = symbol
+        else:
+            self._right[self._pos] = symbol
+
+    def move(self, direction: Direction) -> None:
+        self._pos += direction
+        if self._pos < -len(self._left):
+            self._left.append("B")
+        elif self._pos >= len(self._right):
+            self._right.append("B")
+
+    def configuration(self, state: int) -> str:
+        left = reversed(self._left)
+        right = iter(self._right)
         return "".join(
             chain(
                 "...B",
-                (self[i] for i in range(-len(self._left), pos)),
+                islice(left, len(self._left) + min(self._pos, 0)),
+                islice(right, max(self._pos, 0)),
                 f"[{state}]",
-                (self[i] for i in range(pos, len(self._right))),
-                repeat("B", 1 if pos >= len(self._right) else 0),
+                left,
+                right,
                 "B...",
             )
+        )
+
+    def read_right(self) -> Iterable[str]:
+        return chain(
+            (self._left[i] for i in range(-min(self._pos, 0) - 1, -1, -1)),
+            (self._right[i] for i in range(min(self._pos, 0))),
         )
 
 
@@ -105,14 +115,14 @@ class TM:
 
     def __call__(self, input: str) -> str:
         assert all(a not in self.input_alphabet for a in input)
-        tape = Tape("B", input)
+        tape = Tape(input)
         state = self.start
-        position = 0
         step = 0
         while state != self.end:
-            state, tape[position], move = self.trans[(state, tape[position])]
-            position += move
+            state, symbol, direction = self.trans[(state, tape.read())]
+            tape.write(symbol)
+            tape.move(direction)
             step += 1
             if step >= 1_000_000:
                 raise RuntimeError
-        return "".join(takewhile(self.input_alphabet.__contains__, map(tape.__getitem__, count(position))))
+        return "".join(takewhile(self.input_alphabet.__contains__, tape.read_right()))
