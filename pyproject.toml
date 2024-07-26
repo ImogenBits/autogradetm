@@ -1,27 +1,23 @@
 [build-system]
-requires = ["setuptools", "setuptools-scm"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "moodle-pdf-grader"
+name = "autogradetm"
 version = "0.0.1"
 requires-python = ">=3.12"
-authors = [{ name = "Imogen Hergeth" }]
+authors = [{ name = "Imogen", email = "me@imogen.tech" }]
 
-dependencies = [
-    "typer[all]>=0.12.3",
-    "ruff>=0.5.4",
-    "pypdf>=4.3.0",
-    "reportlab>=4.2.2",
-    "pydantic>=2.8.2",
-    "email-validator>=2.2.0",
-]
+dependencies = ["typer[all]>=0.12.3", "ruff>=0.5.4"]
+description = "Default template for PDM package"
+readme = "README.md"
+license = { text = "MIT" }
 
 [project.optional-dependencies]
 dev = ["pytest"]
 
 [project.scripts]
-autograder = "autograder.scripts:app"
+autogradetm = "autogradetm.scripts:app"
 
 [tool.ruff]
 preview = true
@@ -37,7 +33,6 @@ select = [
     "UP",
     "YTT",
     "ASYNC",
-    "TRIO",
     "BLE",
     "FBT",
     "B",
@@ -107,3 +102,4 @@ reportFunctionMemberAccess = "warning"
 reportOverlappingOverload = "warning"
 
 [tool.pdm]
+distribution = true
