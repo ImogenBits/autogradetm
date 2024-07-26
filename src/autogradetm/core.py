@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import IntEnum
-from itertools import count, repeat, takewhile
+from itertools import chain, count, repeat, takewhile
 from pathlib import Path
 from typing import Self
 
@@ -48,6 +48,18 @@ class Tape:
             self._left[-pos - 1] = symbol
         else:
             self._right[pos] = symbol
+
+    def configuration(self, state: int, pos: int) -> str:
+        return "".join(
+            chain(
+                "...B",
+                (self[i] for i in range(-len(self._left), pos)),
+                f"[{state}]",
+                (self[i] for i in range(pos, len(self._right))),
+                repeat("B", 1 if pos >= len(self._right) else 0),
+                "B...",
+            )
+        )
 
 
 @dataclass
