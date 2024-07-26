@@ -2,7 +2,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import IntEnum
 from itertools import chain, islice, takewhile
-from pathlib import Path
 from typing import Self
 
 
@@ -96,8 +95,8 @@ class TM:
         )
 
     @classmethod
-    def from_file(cls, file: Path) -> Self:
-        num_states, input_alphabet, tape_alphabet, start, end, *trans_graph = file.read_text().splitlines()
+    def from_spec(cls, spec: str) -> Self:
+        num_states, input_alphabet, tape_alphabet, start, end, *trans_graph = spec.splitlines()
         trans: dict[tuple[int, str], tuple[int, str, Direction]] = {}
         for line in trans_graph:
             if line.startswith(("#", "/")) or not line:
