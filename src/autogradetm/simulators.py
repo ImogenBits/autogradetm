@@ -29,7 +29,7 @@ Language("Java", ".java", "maven:latest", "javac -d {compiled}", "java -cp {comp
 
 
 @dataclass
-class Project:
+class TMSimulator:
     language: Language
     root_folder: Path
     entrypoint: Path
@@ -44,7 +44,7 @@ class Project:
         return self._format_cmd(self.language.build_command) + f" {self.code / source_file}"
 
     def run_command(self, tm_filename: str, input: str) -> str:
-        return  self._format_cmd(self.language.run_command) + f" {tm_filename}.TM {input}"
+        return self._format_cmd(self.language.run_command) + f" {tm_filename}.TM {input}"
 
     def _format_cmd(self, base_command: str) -> str:
         return base_command.format(
@@ -55,7 +55,9 @@ class Project:
         )
 
     @classmethod
-    def discover(cls, path: Path, depth: int | None = None, names: Container[str] = (), root: Path | None = None) -> Self | None:
+    def discover(
+        cls, path: Path, depth: int | None = None, names: Container[str] = (), root: Path | None = None
+    ) -> Self | None:
         root = root or path
         for element in path.iterdir():
             if element.is_file() and element.suffix in Language._registry and element.stem in names:
@@ -63,7 +65,7 @@ class Project:
             elif element.is_dir() and depth != 0:
                 return cls.discover(element, depth and depth - 1, names, root)
 
-    def build(self, client: DockerClient, tms_folder: Path) -> Program:
+    def build(self, client: DockerClient, tms_folder: Path) -> BuiltSimulator:
         lang = self.language
         source_mount = Mount(str(self.code), str(self.root_folder), type="bind", read_only=True)
         tms_mount = Mount(str(self.tms), str(tms_folder), type="bind", read_only=True)
@@ -74,11 +76,11 @@ class Project:
                 if file.suffix != lang.extension:
                     continue
                 container.exec_run(self.build_command(file.relative_to(self.root_folder)))
-        return Program(self.language, self.root_folder, self.entrypoint, container)
+        return BuiltSimulator(self.language, self.root_folder, self.entrypoint, container)
 
 
 @dataclass
-class Program(Project):
+class BuiltSimulator(TMSimulator):
     container: DockerContainer
 
     def run(self, tm_file: str, input: str) -> str:
