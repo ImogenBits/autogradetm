@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Container, Iterable
 from dataclasses import dataclass
 from enum import IntEnum
 from itertools import chain, islice, takewhile
@@ -17,6 +17,37 @@ class Direction(IntEnum):
                 return getattr(cls, val)
             case _:
                 raise ValueError
+
+
+@dataclass
+class Configuration:
+    state: int
+    left: str
+    right: str
+
+    def __post_init__(self) -> None:
+        self.left = self.left.lstrip("B")
+        self.right = self.right.rstrip("B")
+
+    def __str__(self) -> str:
+        return f"...{self.left}[{self.state}]{self.right}..."
+
+    @classmethod
+    def parse(cls, data: str, alphabet: Container[str]) -> Self:
+        left, right, num = [], [], []
+        curr = left
+        for char in data:
+            if (curr is num and char.isdigit()) or char in alphabet:
+                curr.append(char)
+            elif char in " .":
+                continue
+            elif char in "[|({":
+                curr = num
+            elif char in "]|)}":
+                curr = right
+            else:
+                raise ValueError(f"Unexpected character {char} in TM configuration")
+        return cls(int("".join(num)), "".join(left), "".join(right))
 
 
 @dataclass
@@ -49,19 +80,17 @@ class Tape:
         elif self._pos >= len(self._right):
             self._right.append("B")
 
-    def configuration(self, state: int) -> str:
+    def configuration(self, state: int) -> Configuration:
         left = reversed(self._left)
         right = iter(self._right)
-        return "".join(
-            chain(
-                "...B",
-                islice(left, len(self._left) + min(self._pos, 0)),
-                islice(right, max(self._pos, 0)),
-                f"[{state}]",
-                left,
-                right,
-                "B...",
-            )
+        left_of_head = "".join(
+            chain(islice(left, len(self._left) + min(self._pos, 0)), islice(right, max(self._pos, 0))),
+        )
+        right_of_head = "".join(chain(left, right))
+        return Configuration(
+            state=state,
+            left=left_of_head,
+            right=right_of_head,
         )
 
     def read_right(self) -> Iterable[str]:
@@ -102,7 +131,7 @@ class TM:
             if line.startswith(("#", "/")) or not line:
                 continue
             state, symbol, out_state, out_symbol, dir, *_ = line.split(" ")
-            trans[(int(state), symbol)] = (int(out_state), out_symbol, Direction.parse(dir))
+            trans[int(state), symbol] = (int(out_state), out_symbol, Direction.parse(dir))
         return cls(
             num_states=int(num_states),
             trans=trans,
@@ -118,7 +147,7 @@ class TM:
         state = self.start
         step = 0
         while state != self.end:
-            state, symbol, direction = self.trans[(state, tape.read())]
+            state, symbol, direction = self.trans[state, tape.read()]
             tape.write(symbol)
             tape.move(direction)
             step += 1
