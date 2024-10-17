@@ -8,7 +8,11 @@ version = "0.0.1"
 requires-python = ">=3.12"
 authors = [{ name = "Imogen", email = "me@imogen.tech" }]
 
-dependencies = ["typer[all]>=0.12.3", "ruff>=0.5.4"]
+dependencies = [
+    "typer[all]>=0.12.3",
+    "ruff>=0.5.4",
+    "docker>=7.1.0",
+]
 description = "Default template for PDM package"
 readme = "README.md"
 license = { text = "MIT" }
@@ -52,7 +56,7 @@ select = [
     "FURB",
     "RUF",
 ]
-ignore = ["TRY003", "PIE790", "FBT001", "B027"]
+ignore = ["TRY003", "PIE790", "FBT001", "B027", "TCH002", "TCH003"]
 
 [tool.ruff.lint.isort]
 split-on-trailing-comma = false
