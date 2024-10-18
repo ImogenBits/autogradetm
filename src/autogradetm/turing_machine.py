@@ -2,7 +2,7 @@ from collections.abc import Container, Iterable
 from dataclasses import dataclass
 from enum import IntEnum
 from itertools import chain, islice, takewhile
-from typing import Self
+from typing import Literal, Self, overload
 
 
 class Direction(IntEnum):
@@ -141,11 +141,17 @@ class TM:
             end=int(end),
         )
 
-    def __call__(self, input: str) -> str:
+    @overload
+    def __call__(self, input: str, output: Literal["result"] = "result") -> str: ...
+    @overload
+    def __call__(self, input: str, output: Literal["configs"]) -> list[Configuration]: ...
+
+    def __call__(self, input: str, output: Literal["result", "configs"] = "result") -> str | list[Configuration]:
         assert all(a not in self.input_alphabet for a in input)
         tape = Tape(input)
         state = self.start
         step = 0
+        configs = []
         while state != self.end:
             state, symbol, direction = self.trans[state, tape.read()]
             tape.write(symbol)
@@ -153,4 +159,9 @@ class TM:
             step += 1
             if step >= 1_000_000:
                 raise RuntimeError
-        return "".join(takewhile(self.input_alphabet.__contains__, tape.read_right()))
+            if output == "configs":
+                configs.append(tape.configuration(state))
+        if output == "result":
+            return "".join(takewhile(self.input_alphabet.__contains__, tape.read_right()))
+        else:
+            return configs

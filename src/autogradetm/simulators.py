@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Container
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Self, cast
@@ -32,6 +32,7 @@ Language("Java", ".java", "maven:latest", "javac -d {compiled}", "java -cp {comp
 class TMSimulator:
     language: Language
     root_folder: Path
+    files: list[Path]
     entrypoint: Path
 
     code: ClassVar[Path] = Path("/code/")
@@ -55,15 +56,20 @@ class TMSimulator:
         )
 
     @classmethod
-    def discover(
-        cls, path: Path, depth: int | None = None, names: Container[str] = (), root: Path | None = None
-    ) -> Self | None:
-        root = root or path
-        for element in path.iterdir():
-            if element.is_file() and element.suffix in Language._registry and element.stem in names:
-                return cls(Language._registry[element.suffix], root, element.relative_to(root))
-            elif element.is_dir() and depth != 0:
-                return cls.discover(element, depth and depth - 1, names, root)
+    def gather_files(cls, path: Path, depth: int | None) -> Iterable[Path]:
+        for file in path.iterdir():
+            if file.is_file() and file.suffix in Language._registry:
+                yield file
+            elif file.is_dir() and not file.name.startswith("."):
+                yield from cls.gather_files(file, depth and depth - 1)
+
+    @classmethod
+    def discover(cls, path: Path, depth: int | None = None) -> Self | list[Path]:
+        files = [file.relative_to(path) for file in cls.gather_files(path, depth)]
+        for file in files:
+            if file.stem.lower() == "main":
+                return cls(Language._registry[file.suffix], path, files, file)
+        return files
 
     def build(self, client: DockerClient, tms_folder: Path) -> BuiltSimulator:
         lang = self.language
@@ -72,11 +78,9 @@ class TMSimulator:
         container = client.containers.create(lang.docker_image, detach=True, mounts=[source_mount, tms_mount])
         container.exec_run(f"mkdir {self.compiled}")
         if lang.build_command:
-            for file in self.entrypoint.parent.iterdir():
-                if file.suffix != lang.extension:
-                    continue
+            for file in self.files:
                 container.exec_run(self.build_command(file.relative_to(self.root_folder)))
-        return BuiltSimulator(self.language, self.root_folder, self.entrypoint, container)
+        return BuiltSimulator(self.language, self.root_folder, self.files, self.entrypoint, container)
 
 
 @dataclass
