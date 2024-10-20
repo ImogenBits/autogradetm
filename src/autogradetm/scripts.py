@@ -12,7 +12,7 @@ from rich.theme import Theme
 from typer import Abort, Argument, Typer
 
 from autogradetm.simulators import Language, TMSimulator
-from autogradetm.turing_machine import TM, Configuration
+from autogradetm.turing_machine import TM, TM_FOLDER, Configuration
 
 app = Typer(pretty_exceptions_show_locals=True)
 theme = Theme({
@@ -25,8 +25,7 @@ theme = Theme({
 })
 console = Console(theme=theme)
 
-TM_FOLDER = Path(__file__).parent / "tms"
-TESTS = [
+TEST_INPUTS = [
     ("add", "0#0"),
     ("add", "11#00111"),
     ("equal", "11000#001"),
@@ -34,6 +33,7 @@ TESTS = [
     ("invert", "0101"),
     ("invert", "111"),
 ]
+TESTS = [(name, input, tm :=TM.get(name), tm(input, "configs")) for name, input in TEST_INPUTS]
 
 
 def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
@@ -118,9 +118,7 @@ def test_simulators(
             simulator = TMSimulator(Language._registry[entrypoint.suffix], submission, simulator, entrypoint)
 
         with simulator.build(client, TM_FOLDER) as simulator:
-            for tm_name, input in TESTS:
-                tm = TM.from_spec(TM_FOLDER.joinpath(f"{tm_name}.TM").read_text())
-                correct = tm(input, "configs")
+            for tm_name, input, tm, correct in TESTS:
                 try:
                     res = simulator.run(tm_name, input)
                 except ValueError as e:

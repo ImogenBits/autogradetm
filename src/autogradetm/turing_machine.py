@@ -2,7 +2,10 @@ from collections.abc import Container, Iterable
 from dataclasses import dataclass
 from enum import IntEnum
 from itertools import chain, islice, takewhile
-from typing import Literal, Self, overload
+from pathlib import Path
+from typing import ClassVar, Literal, Self, overload
+
+TM_FOLDER = Path(__file__).parent / "tms"
 
 
 class Direction(IntEnum):
@@ -120,6 +123,8 @@ class TM:
     start: int
     end: int
 
+    _cache: ClassVar[dict[str, Self]] = {}
+
     def __post_init__(self) -> None:
         assert 1 <= self.start <= self.num_states
         assert 1 <= self.end <= self.num_states
@@ -151,6 +156,12 @@ class TM:
             start=int(start),
             end=int(end),
         )
+
+    @classmethod
+    def get(cls, name: str) -> Self:
+        if name not in cls._cache:
+            cls._cache[name] = cls.from_spec(TM_FOLDER.joinpath(f"{name}.TM").read_text())
+        return cls._cache[name]
 
     @overload
     def __call__(self, input: str, output: Literal["result"] = "result") -> str: ...
