@@ -121,7 +121,15 @@ def test_simulators(
             for tm_name, input in TESTS:
                 tm = TM.from_spec(TM_FOLDER.joinpath(f"{tm_name}.TM").read_text())
                 correct = tm(input, "configs")
-                res = simulator.run(tm_name, input)
+                try:
+                    res = simulator.run(tm_name, input)
+                except ValueError as e:
+                    console.print(
+                        f"[error]An error occured when simulating TM '{tm_name}' on input '{input}':[/]\n"
+                        f"{e.args[0]}"
+                    )
+                    continue
+
                 parsed = list[Configuration]()
                 for line in res.splitlines():
                     try:

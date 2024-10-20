@@ -118,5 +118,9 @@ class BuiltSimulator(TMSimulator):
 
     def run(self, tm_name: str, input: str) -> str:
         command = [*self.language.run_command(self.entrypoint), f"{tm_name}.TM", input]
-        res = self.container.exec_run(command, workdir=TMS.as_posix())
-        return cast(bytes, res.output).decode("utf-8")
+        res = self.container.exec_run(command, workdir=TMS.as_posix(), demux=True)
+        exit_code, (out, err) = cast(tuple[int, tuple[bytes, bytes]], res)
+        if exit_code:
+            raise ValueError(err.decode("utf-8"))
+        else:
+            return out.decode("utf-8")
