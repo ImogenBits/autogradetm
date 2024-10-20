@@ -36,6 +36,10 @@ TEST_INPUTS = [
 TESTS = [(name, input, tm :=TM.get(name), tm(input, "configs")) for name, input in TEST_INPUTS]
 
 
+def truncate(lines: list[str]) -> str:
+    return "\n".join(lines[:20]) + ("\n..." if len(lines) > 20 else "")
+
+
 def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
     if (diff := len(correct) - len(err)) != 0:
         if diff > 0:
@@ -55,14 +59,14 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
                     if i != 0:
                         res.append("...")
                     res.extend(f"{i + len(short)}    {config:>}" for i, config in enumerate(long[i - diff :]))
-                return "\n".join(res)
+                return truncate(res)
 
     res = ["[header]The correct and actually outputted config sequences are:[/]", "step    correct    output"]
-    for i, (good, bad) in enumerate(zip_longest(correct, err, fillvalue="")):
+    for i, (good, bad) in enumerate(zip_longest(correct, err, fillvalue=" " * 9)):
         if good == bad:
             continue
         res.append(f"{i}    {good:>}    {bad:>}")
-    return "\n".join(res)
+    return truncate(res)
 
 
 @app.command(name="simulators")
