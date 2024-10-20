@@ -58,6 +58,27 @@ class Java(Language):
         return ["java", "-cp", COMPILED.as_posix(), entrypoint.stem]
 
 
+class C(Language):
+    extension = ".c"
+    docker_image = "gcc:latest"
+
+    main_path = COMPILED.joinpath("main").as_posix()
+
+    def build_commands(self, sources: list[Path]) -> Iterable[list[str]]:
+        yield ["gcc", "-o", self.main_path, *(f.as_posix() for f in sources)]
+
+    def run_command(self, entrypoint: Path) -> list[str]:
+        return [self.main_path]
+
+
+class CPP(C):
+    extension = ".cpp"
+
+    def build_commands(self, sources: list[Path]) -> Iterable[list[str]]:
+        for _, *args in super().build_commands(sources):
+            yield ["g++", *args]
+
+
 @dataclass
 class TMSimulator:
     language: Language
