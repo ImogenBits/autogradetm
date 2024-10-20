@@ -147,7 +147,7 @@ class TM:
     def __call__(self, input: str, output: Literal["configs"]) -> list[Configuration]: ...
 
     def __call__(self, input: str, output: Literal["result", "configs"] = "result") -> str | list[Configuration]:
-        assert all(a not in self.input_alphabet for a in input)
+        assert all(a in self.input_alphabet for a in input)
         tape = Tape(input)
         state = self.start
         step = 0

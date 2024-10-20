@@ -25,7 +25,7 @@ class Language:
 
 
 Language("Python", ".py", "python:3.13", None, "py {code}/{entrypoint}")
-Language("Java", ".java", "maven:latest", "javac -d {compiled}", "java -cp {compiled} {entrypoint.stem}")
+Language("Java", ".java", "maven:latest", "javac -d {compiled}", "java -cp {compiled} {entrypoint_name}")
 
 
 @dataclass
@@ -42,17 +42,18 @@ class TMSimulator:
     def build_command(self, source_file: Path) -> str | None:
         if self.language.build_command is None:
             return None
-        return self._format_cmd(self.language.build_command) + f" {self.code / source_file}"
+        return self._format_cmd(self.language.build_command) + f" {self.code.joinpath(source_file).as_posix()}"
 
     def run_command(self, tm_filename: str, input: str) -> str:
         return self._format_cmd(self.language.run_command) + f" {tm_filename}.TM {input}"
 
     def _format_cmd(self, base_command: str) -> str:
         return base_command.format(
-            code=self.code,
-            compiled=self.compiled,
-            entrypoint=self.entrypoint,
-            tms=self.tms,
+            code=self.code.as_posix(),
+            compiled=self.compiled.as_posix(),
+            entrypoint=self.entrypoint.as_posix(),
+            tms=self.tms.as_posix(),
+            entrypoint_name=self.entrypoint.stem,
         )
 
     @classmethod
@@ -73,13 +74,19 @@ class TMSimulator:
 
     def build(self, client: DockerClient, tms_folder: Path) -> BuiltSimulator:
         lang = self.language
-        source_mount = Mount(str(self.code), str(self.root_folder), type="bind", read_only=True)
-        tms_mount = Mount(str(self.tms), str(tms_folder), type="bind", read_only=True)
-        container = client.containers.create(lang.docker_image, detach=True, mounts=[source_mount, tms_mount])
+        source_mount = Mount(self.code.as_posix(), str(self.root_folder.absolute()), type="bind", read_only=True)
+        tms_mount = Mount(self.tms.as_posix(), str(tms_folder.absolute()), type="bind", read_only=True)
+        container = client.containers.run(
+            lang.docker_image,
+            command="bash",
+            mounts=[source_mount, tms_mount],
+            tty=True,
+            detach=True,
+        )
         container.exec_run(f"mkdir {self.compiled}")
         if lang.build_command:
             for file in self.files:
-                container.exec_run(self.build_command(file.relative_to(self.root_folder)))
+                container.exec_run(self.build_command(file))
         return BuiltSimulator(self.language, self.root_folder, self.files, self.entrypoint, container)
 
 
@@ -87,6 +94,12 @@ class TMSimulator:
 class BuiltSimulator(TMSimulator):
     container: DockerContainer
 
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.container.remove(force=True)
+
     def run(self, tm_file: str, input: str) -> str:
-        res = self.container.exec_run(self.run_command(tm_file, input), workdir=self.tms)
+        res = self.container.exec_run(self.run_command(tm_file, input), workdir=self.tms.as_posix())
         return cast(bytes, res.output).decode("utf-8")
