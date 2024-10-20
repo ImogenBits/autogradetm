@@ -101,8 +101,9 @@ class TMSimulator:
         )
         container.exec_run(f"mkdir {COMPILED.as_posix()}")
         for command in lang.build_commands(self.files):
-            res = container.exec_run(command, workdir=CODE.as_posix())
-            print(res.output.decode("utf-8"))
+            exit_code, output = container.exec_run(command, workdir=CODE.as_posix())
+            if exit_code:
+                raise RuntimeError(output.decode("utf-8"))
         return BuiltSimulator(self.language, self.root_folder, self.files, self.entrypoint, container)
 
 
@@ -121,6 +122,6 @@ class BuiltSimulator(TMSimulator):
         res = self.container.exec_run(command, workdir=TMS.as_posix(), demux=True)
         exit_code, (out, err) = cast(tuple[int, tuple[bytes, bytes]], res)
         if exit_code:
-            raise ValueError(err.decode("utf-8"))
+            raise ValueError(err.decode("utf-8") if err else out.decode("utf-8"))
         else:
             return out.decode("utf-8")

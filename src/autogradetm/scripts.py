@@ -117,7 +117,12 @@ def test_simulators(
             )
             simulator = TMSimulator(Language._registry[entrypoint.suffix], submission, simulator, entrypoint)
 
-        with simulator.build(client, TM_FOLDER) as simulator:
+        try:
+            simulator = simulator.build(client, TM_FOLDER)
+        except RuntimeError as e:
+            console.print(f"[error]Error when building submission code:[/]\n{e.args[0]}")
+            continue
+        with simulator:
             for tm_name, input, tm, correct in TESTS:
                 try:
                     res = simulator.run(tm_name, input)
