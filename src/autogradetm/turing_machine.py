@@ -32,6 +32,17 @@ class Configuration:
     def __str__(self) -> str:
         return f"...{self.left}[{self.state}]{self.right}..."
 
+    def __format__(self, format: str) -> str:
+        if not format:
+            return str(self)
+        elif format == ">":
+            left = ["[grey58]B[/]" if char == "B" else char for char in self.left]
+            state = f"[cyan]\\[{self.state}][/]"
+            right = ["[grey58]B[/]" if char == "B" else char for char in self.right]
+            return f"...{"".join(left)}{state}{"".join(right)}..."
+        else:
+            raise ValueError
+
     @classmethod
     def parse(cls, data: str, alphabet: Container[str]) -> Self:
         left, right, num = [], [], []
@@ -151,7 +162,7 @@ class TM:
         tape = Tape(input)
         state = self.start
         step = 0
-        configs = []
+        configs = [tape.configuration(state)]
         while state != self.end:
             state, symbol, direction = self.trans[state, tape.read()]
             tape.write(symbol)

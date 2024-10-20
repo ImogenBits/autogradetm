@@ -1,3 +1,4 @@
+from itertools import islice, zip_longest
 from pathlib import Path
 from typing import Annotated
 from zipfile import ZipFile
@@ -32,6 +33,35 @@ TESTS = [
     ("invert", "0101"),
     ("invert", "111"),
 ]
+
+
+def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
+    if (diff := len(correct) - len(err)) != 0:
+        if diff > 0:
+            long, short = correct, err
+            header = "The output is missing the following configurations:"
+        else:
+            long, short = err, correct
+            header = "The output incorrectly contains the following configurations:"
+        for i in range(diff + 1):
+            if long[i:(i - diff) or None] == short:
+                res = [
+                    header,
+                    "[header]step    config[/]",
+                    *(f"{i}    {config:>}" for i, config in islice(enumerate(long), i)),
+                ]
+                if i != diff:
+                    if i != 0:
+                        res.append("...")
+                    res.extend(f"{i + len(short)}    {config:>}" for i, config in enumerate(long[i - diff:]))
+                return "\n".join(res)
+
+    res = ["[header]step    correct    output[/]"]
+    for i, (good, bad) in enumerate(zip_longest(correct, err, fillvalue="")):
+        if good == bad:
+            continue
+        res.append(f"{i}    {good:>}    {bad:>}")
+    return "\n".join(res)
 
 
 @app.command(name="simulators")
@@ -81,15 +111,24 @@ def test_simulators(
                 tm = TM.from_spec(TM_FOLDER.joinpath(f"{tm_name}.TM").read_text())
                 correct = tm(input, "configs")
                 res = simulator.run(tm_name, input)
-                res = [Configuration.parse(line, tm.input_alphabet) for line in res.splitlines()]
-                if res == correct:
+                parsed = list[Configuration]()
+                for line in res.splitlines():
+                    try:
+                        parsed.append(Configuration.parse(line, tm.tape_alphabet))
+                    except ValueError:
+                        console.print(
+                            f"[error]Could not parse output line as TM config, it will be ignored:[/]\n"
+                            f"[warning]'{line}'[/]"
+                        )
+                if parsed == correct:
                     console.print(f"[success]Correctly simulated TM '{tm_name}' on input '{input}'.")
+                elif not parsed:
+                    console.print("[error]The output does not contain any TM configurations.")
                 else:
                     console.print(
-                        f"[error]Incorrectly simulated TM '{tm_name}' on input '{input}'.[/]\n"
-                        f"Correct output:\n{"\n".join(f"{c}\n" for c in correct)}\n"
-                        f"Simulation result:\n{"\n".join(f"{c}\n" for c in res)}\n"
+                        f"[error]Incorrectly simulated TM '{tm_name}' on input '{input}'.[/]\nThe differences are:"
                     )
+                    console.print(get_diff(correct, parsed), highlight=False)
 
 
 @app.command()

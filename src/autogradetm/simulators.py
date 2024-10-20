@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from abc import abstractmethod
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Self, cast
@@ -9,23 +10,52 @@ from docker import DockerClient
 from docker.models.containers import Container as DockerContainer
 from docker.types import Mount
 
+CODE = Path("/code/")
+COMPILED = Path("/compiled/")
+TMS = Path("/TMs/")
 
-@dataclass
+
+def get_unique[T](test: Callable[[T], bool], items: Iterable[T]) -> T | None:
+    res = [i for i in items if test(i)]
+    if len(res) == 1:
+        return res[0]
+    else:
+        return None
+
+
 class Language:
-    name: str
-    extension: str
-    docker_image: str
-    build_command: str | None
-    run_command: str
+    extension: ClassVar[str]
+    docker_image: ClassVar[str]
 
     _registry: ClassVar[dict[str, Self]] = {}
 
-    def __post_init__(self) -> None:
-        self._registry[self.extension] = self
+    def __init_subclass__(cls) -> None:
+        cls._registry[cls.extension] = cls()
+
+    def build_commands(self, sources: list[Path]) -> Iterable[str]:
+        return []
+
+    @abstractmethod
+    def run_command(self, entrypoint: Path) -> str: ...
 
 
-Language("Python", ".py", "python:3.13", None, "py {code}/{entrypoint}")
-Language("Java", ".java", "maven:latest", "javac -d {compiled}", "java -cp {compiled} {entrypoint_name}")
+class Python(Language):
+    extension = ".py"
+    docker_image = "python:3.13"
+
+    def run_command(self, entrypoint: Path) -> str:
+        return f"python {CODE.joinpath(entrypoint).as_posix()}"
+
+
+class Java(Language):
+    extension = ".java"
+    docker_image = "maven:latest"
+
+    def build_commands(self, sources: list[Path]) -> Iterable[str]:
+        yield f"javac -d {COMPILED.as_posix()} {" ".join(source.as_posix() for source in sources)}"
+
+    def run_command(self, entrypoint: Path) -> str:
+        return f"java -cp {COMPILED.as_posix()} {entrypoint.stem}"
 
 
 @dataclass
@@ -34,27 +64,6 @@ class TMSimulator:
     root_folder: Path
     files: list[Path]
     entrypoint: Path
-
-    code: ClassVar[Path] = Path("/code/")
-    compiled: ClassVar[Path] = Path("/compiled/")
-    tms: ClassVar[Path] = Path("/TMs/")
-
-    def build_command(self, source_file: Path) -> str | None:
-        if self.language.build_command is None:
-            return None
-        return self._format_cmd(self.language.build_command) + f" {self.code.joinpath(source_file).as_posix()}"
-
-    def run_command(self, tm_filename: str, input: str) -> str:
-        return self._format_cmd(self.language.run_command) + f" {tm_filename}.TM {input}"
-
-    def _format_cmd(self, base_command: str) -> str:
-        return base_command.format(
-            code=self.code.as_posix(),
-            compiled=self.compiled.as_posix(),
-            entrypoint=self.entrypoint.as_posix(),
-            tms=self.tms.as_posix(),
-            entrypoint_name=self.entrypoint.stem,
-        )
 
     @classmethod
     def gather_files(cls, path: Path, depth: int | None) -> Iterable[Path]:
@@ -67,15 +76,22 @@ class TMSimulator:
     @classmethod
     def discover(cls, path: Path, depth: int | None = None) -> Self | list[Path]:
         files = [file.relative_to(path) for file in cls.gather_files(path, depth)]
-        for file in files:
-            if file.stem.lower() == "main":
-                return cls(Language._registry[file.suffix], path, files, file)
+        for test in ("", "main", "sim", "program"):
+            match [f for f in files if f.stem.lower().find(test) != -1]:
+                case []:
+                    pass
+                case [entrypoint]:
+                    return cls(Language._registry[entrypoint.suffix], path, files, entrypoint)
+                case _ if test != "":
+                    return files
+                case _:
+                    pass
         return files
 
     def build(self, client: DockerClient, tms_folder: Path) -> BuiltSimulator:
         lang = self.language
-        source_mount = Mount(self.code.as_posix(), str(self.root_folder.absolute()), type="bind", read_only=True)
-        tms_mount = Mount(self.tms.as_posix(), str(tms_folder.absolute()), type="bind", read_only=True)
+        source_mount = Mount(CODE.as_posix(), str(self.root_folder.absolute()), type="bind", read_only=True)
+        tms_mount = Mount(TMS.as_posix(), str(tms_folder.absolute()), type="bind", read_only=True)
         container = client.containers.run(
             lang.docker_image,
             command="bash",
@@ -83,10 +99,10 @@ class TMSimulator:
             tty=True,
             detach=True,
         )
-        container.exec_run(f"mkdir {self.compiled}")
-        if lang.build_command:
-            for file in self.files:
-                container.exec_run(self.build_command(file))
+        container.exec_run(f"mkdir {COMPILED.as_posix()}")
+        for command in lang.build_commands(self.files):
+            res = container.exec_run(command, workdir=CODE.as_posix())
+            print(res.output.decode("utf-8"))
         return BuiltSimulator(self.language, self.root_folder, self.files, self.entrypoint, container)
 
 
@@ -100,6 +116,7 @@ class BuiltSimulator(TMSimulator):
     def __exit__(self, *args: object) -> None:
         self.container.remove(force=True)
 
-    def run(self, tm_file: str, input: str) -> str:
-        res = self.container.exec_run(self.run_command(tm_file, input), workdir=self.tms.as_posix())
+    def run(self, tm_name: str, input: str) -> str:
+        command = f'{self.language.run_command(self.entrypoint)} {tm_name}.TM "{input}"'
+        res = self.container.exec_run(command, workdir=TMS.as_posix())
         return cast(bytes, res.output).decode("utf-8")
