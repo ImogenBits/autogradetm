@@ -32,30 +32,30 @@ class Language:
     def __init_subclass__(cls) -> None:
         cls._registry[cls.extension] = cls()
 
-    def build_commands(self, sources: list[Path]) -> Iterable[str]:
+    def build_commands(self, sources: list[Path]) -> Iterable[list[str]]:
         return []
 
     @abstractmethod
-    def run_command(self, entrypoint: Path) -> str: ...
+    def run_command(self, entrypoint: Path) -> list[str]: ...
 
 
 class Python(Language):
     extension = ".py"
     docker_image = "python:3.13"
 
-    def run_command(self, entrypoint: Path) -> str:
-        return f"python {CODE.joinpath(entrypoint).as_posix()}"
+    def run_command(self, entrypoint: Path) -> list[str]:
+        return ["python", CODE.joinpath(entrypoint).as_posix()]
 
 
 class Java(Language):
     extension = ".java"
     docker_image = "maven:latest"
 
-    def build_commands(self, sources: list[Path]) -> Iterable[str]:
-        yield f"javac -d {COMPILED.as_posix()} {" ".join(source.as_posix() for source in sources)}"
+    def build_commands(self, sources: list[Path]) -> Iterable[list[str]]:
+        yield ["javac", "-d", COMPILED.as_posix(), *(source.as_posix() for source in sources)]
 
-    def run_command(self, entrypoint: Path) -> str:
-        return f"java -cp {COMPILED.as_posix()} {entrypoint.stem}"
+    def run_command(self, entrypoint: Path) -> list[str]:
+        return ["java", "-cp", COMPILED.as_posix(), entrypoint.stem]
 
 
 @dataclass
@@ -117,6 +117,6 @@ class BuiltSimulator(TMSimulator):
         self.container.remove(force=True)
 
     def run(self, tm_name: str, input: str) -> str:
-        command = f'{self.language.run_command(self.entrypoint)} {tm_name}.TM "{input}"'
+        command = [*self.language.run_command(self.entrypoint), f"{tm_name}.TM", input]
         res = self.container.exec_run(command, workdir=TMS.as_posix())
         return cast(bytes, res.output).decode("utf-8")
