@@ -1,3 +1,4 @@
+import operator
 from itertools import islice, zip_longest
 from pathlib import Path
 from typing import Annotated
@@ -6,7 +7,7 @@ from zipfile import ZipFile
 from docker import from_env
 from docker.errors import APIError, DockerException
 from rich.console import Console
-from rich.prompt import Prompt
+from rich.prompt import Confirm, Prompt
 from rich.theme import Theme
 from typer import Abort, Argument, Typer
 
@@ -44,7 +45,7 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
             long, short = err, correct
             header = "The output incorrectly contains the following configurations:"
         for i in range(diff + 1):
-            if long[i:(i - diff) or None] == short:
+            if long[i : (i - diff) or None] == short:
                 res = [
                     header,
                     "[header]step    config[/]",
@@ -53,7 +54,7 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
                 if i != diff:
                     if i != 0:
                         res.append("...")
-                    res.extend(f"{i + len(short)}    {config:>}" for i, config in enumerate(long[i - diff:]))
+                    res.extend(f"{i + len(short)}    {config:>}" for i, config in enumerate(long[i - diff :]))
                 return "\n".join(res)
 
     res = ["[header]step    correct    output[/]"]
@@ -77,10 +78,20 @@ def test_simulators(
         console.print_exception()
         raise Abort from e
 
-    for submission in assignment_submissions.iterdir():
-        if submission.is_file() and submission.suffix != ".zip":
-            continue
-        group = int(submission.name.split()[3].split("_")[0])
+    submission_folders = sorted(
+        (
+            (f, int(f.name.split()[3].split("_")[0]))
+            for f in assignment_submissions.iterdir()
+            if f.is_dir() or f.suffix == ".zip"
+        ),
+        key=operator.itemgetter(1),
+    )
+    for submission, group in submission_folders:
+        if group != submission_folders[0][1]:
+            response = Confirm.ask(f"Do you want to continue with group {group}?", default="y")
+            if not response:
+                raise Abort
+
         console.print(f"[heading]Processing submission of group {group}")
         if submission.is_file():
             with ZipFile(submission) as zipped:
@@ -129,6 +140,7 @@ def test_simulators(
                         f"[error]Incorrectly simulated TM '{tm_name}' on input '{input}'.[/]\nThe differences are:"
                     )
                     console.print(get_diff(correct, parsed), highlight=False)
+        console.print(f"[success]Finished testing group {group}.")
 
 
 @app.command()
