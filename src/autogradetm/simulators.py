@@ -70,7 +70,7 @@ class TMSimulator:
         for file in path.iterdir():
             if file.is_file() and file.suffix in Language._registry:
                 yield file
-            elif file.is_dir() and not file.name.startswith("."):
+            elif file.is_dir() and not file.name.startswith(".") and file.name != "__MACOSX":
                 yield from cls.gather_files(file, depth and depth - 1)
 
     @classmethod
