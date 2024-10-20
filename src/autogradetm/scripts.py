@@ -40,15 +40,15 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
     if (diff := len(correct) - len(err)) != 0:
         if diff > 0:
             long, short = correct, err
-            header = "The output is missing the following configurations:"
+            header = "[header]The output is missing the following configurations:[/]"
         else:
             long, short = err, correct
-            header = "The output incorrectly contains the following configurations:"
+            header = "[header]The output incorrectly contains the following configurations:[/]"
         for i in range(diff + 1):
             if long[i : (i - diff) or None] == short:
                 res = [
                     header,
-                    "[header]step    config[/]",
+                    "step    config",
                     *(f"{i}    {config:>}" for i, config in islice(enumerate(long), i)),
                 ]
                 if i != diff:
@@ -57,7 +57,7 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
                     res.extend(f"{i + len(short)}    {config:>}" for i, config in enumerate(long[i - diff :]))
                 return "\n".join(res)
 
-    res = ["[header]step    correct    output[/]"]
+    res = ["[header]The correct and actually outputted config sequences are:[/]", "step    correct    output"]
     for i, (good, bad) in enumerate(zip_longest(correct, err, fillvalue="")):
         if good == bad:
             continue
@@ -130,23 +130,24 @@ def test_simulators(
                     )
                     continue
 
-                parsed = list[Configuration]()
+                parsed, incorrect_lines = list[Configuration](), list[str]()
                 for line in res.splitlines():
                     try:
                         parsed.append(Configuration.parse(line, tm.tape_alphabet))
                     except ValueError:
-                        console.print(
-                            f"[error]Could not parse output line as TM config, it will be ignored:[/]\n"
-                            f"[warning]'{line}'[/]"
-                        )
+                        incorrect_lines.append(line)
                 if parsed == correct:
                     console.print(f"[success]Correctly simulated TM '{tm_name}' on input '{input}'.")
-                elif not parsed:
+                    continue
+
+                console.print(f"[error]Simulating TM '{tm_name}' on input '{input}' produced incorrect results:")
+                if incorrect_lines:
+                    console.print(
+                        "The following lines could not be parsed as TM configs:\n" + "\n".join(incorrect_lines)
+                    )
+                if not parsed:
                     console.print("[error]The output does not contain any TM configurations.")
                 else:
-                    console.print(
-                        f"[error]Incorrectly simulated TM '{tm_name}' on input '{input}'.[/]\nThe differences are:"
-                    )
                     console.print(get_diff(correct, parsed), highlight=False)
         console.print(f"[success]Finished testing group {group}.")
 
