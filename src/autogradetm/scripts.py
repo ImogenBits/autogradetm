@@ -35,7 +35,7 @@ TEST_INPUTS = [
     ("invert", "0101"),
     ("invert", "111"),
 ]
-TESTS = [(name, input, tm := TM.get(name), tm(input, "configs")) for name, input in TEST_INPUTS]
+TESTS = [(name, input, tm := TM.get(name), tm(input, log_configs=True)[1]) for name, input in TEST_INPUTS]
 
 
 def truncate(lines: list[str]) -> str:
@@ -55,12 +55,12 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
                 res = [
                     header,
                     "step    config",
-                    *(f"{i}    {config:>}" for i, config in islice(enumerate(long), i)),
+                    *(f"{i: >3}    {config:>}" for i, config in islice(enumerate(long), i)),
                 ]
                 if i != diff:
                     if i != 0:
-                        res.append("...")
-                    res.extend(f"{i + len(short)}    {config:>}" for i, config in enumerate(long[i - diff :]))
+                        res.append("⋮")
+                    res.extend(f"{i + len(short): >3}    {config:>}" for i, config in enumerate(long[i - diff :]))
                 return truncate(res)
 
     res = ["[header]The correct and actually outputted config sequences are:[/]", "step    correct    output"]
@@ -214,6 +214,21 @@ TM_EXERCISES = [
 ]
 
 
+def format_configs(configs: list[Configuration], truncate: int | None = 20) -> str:
+    if truncate is not None:
+        offset = max(0, len(configs) - truncate)
+        configs = configs[-truncate:]
+    else:
+        offset = 0
+    out = [
+        "Configuration sequence:\n"
+        "[header]step    configuration[/]\n",
+        "  ⋮\n" if offset else "",
+        *(f"{i: >3}    {c:>}\n" for i, c in enumerate(configs, offset)),
+    ]
+    return "".join(out)
+
+
 @app.command()
 def tms(
     assignment_submissions: Annotated[
@@ -254,23 +269,27 @@ def tms(
             for input in exercise.data:
                 console.print(f"[header]Testing TM on input '{input}':")
                 try:
-                    output = tm(input)
+                    output, configs = tm(input, log_configs=True)
                 except KeyError as e:
                     console.print(f"[error]The TM file is missing a needed transition: {e.args[0]}.")
+                    console.print(format_configs(e.args[1]))
                     continue
-                except TimeoutError:
+                except TimeoutError as e:
                     console.print("[error]The TM is stuck in an infinite loop.")
+                    console.print(format_configs(e.args[0]))
                     continue
                 correct = exercise.correct(input)
                 try:
                     parsed = exercise.parse(output)
                 except ValueError:
-                    console.print(f"[error]The TM produces incorrect output '{output}'")
+                    console.print(f"[error]The TM produces invalid output '{output}'")
+                    console.print(format_configs(configs))
                     continue
                 if parsed == correct:
                     console.print("[success]The TM runs correctly.")
                 else:
                     console.print(f"[error]The TM outputs '{output}' instead of '{correct}'.")
+                    console.print(format_configs(configs))
 
 
 if __name__ == "__main__":

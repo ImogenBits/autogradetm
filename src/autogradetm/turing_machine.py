@@ -39,12 +39,15 @@ class Configuration:
         if not format:
             return str(self)
         elif format == ">":
-            left = ["[grey58]B[/]" if char == "B" else char for char in self.left]
-            state = f"[cyan]\\[{self.state}][/]"
-            right = ["[grey58]B[/]" if char == "B" else char for char in self.right]
-            return f"...{"".join(left)}{state}{"".join(right)}..."
+            return self.pretty()
         else:
             raise ValueError
+
+    def pretty(self) -> str:
+        left = ["[grey58]B[/]" if char == "B" else char for char in self.left]
+        state = f"[cyan]\\[{self.state}][/]"
+        right = ["[grey58]B[/]" if char == "B" else char for char in self.right]
+        return f"...[grey58]B[/]{"".join(left)}{state}{"".join(right)}[grey58]B[/]..."
 
     @classmethod
     def parse(cls, data: str, alphabet: Container[str]) -> Self:
@@ -165,26 +168,33 @@ class TM:
         return cls._cache[name]
 
     @overload
-    def __call__(self, input: str, output: Literal["result"] = "result") -> str: ...
+    def __call__(self, input: str, *, log_configs: Literal[False] = False) -> str: ...
     @overload
-    def __call__(self, input: str, output: Literal["configs"]) -> list[Configuration]: ...
+    def __call__(self, input: str, *, log_configs: Literal[True]) -> tuple[str, list[Configuration]]: ...
 
-    def __call__(self, input: str, output: Literal["result", "configs"] = "result") -> str | list[Configuration]:
+    def __call__(self, input: str, *, log_configs: bool = False) -> str | tuple[str, list[Configuration]]:
         assert all(a in self.input_alphabet for a in input)
         tape = Tape(input)
         state = self.start
         step = 0
         configs = [tape.configuration(state)]
         while state != self.end:
-            state, symbol, direction = self.trans[state, tape.read()]
+            try:
+                state, symbol, direction = self.trans[state, tape.read()]
+            except KeyError as e:
+                if log_configs:
+                    raise KeyError(*e.args, configs) from e
+                else:
+                    raise
             tape.write(symbol)
             tape.move(direction)
             step += 1
             if step >= 1_000_000:
-                raise TimeoutError
-            if output == "configs":
+                if log_configs:
+                    raise TimeoutError(configs)
+                else:
+                    raise TimeoutError
+            if log_configs:
                 configs.append(tape.configuration(state))
-        if output == "result":
-            return "".join(takewhile(self.input_alphabet.__contains__, tape.read_right()))
-        else:
-            return configs
+        res = "".join(takewhile(self.input_alphabet.__contains__, tape.read_right()))
+        return (res, configs) if log_configs else res
