@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 from abc import abstractmethod
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,24 +17,23 @@ COMPILED = Path("/compiled/")
 TMS = Path("/TMs/")
 
 
-def get_unique[T](test: Callable[[T], bool], items: Iterable[T]) -> T | None:
-    res = [i for i in items if test(i)]
-    if len(res) == 1:
-        return res[0]
-    else:
-        return None
-
-
 class Language:
-    extension: ClassVar[str]
+    extension: ClassVar[str | tuple[str, ...]]
     docker_image: ClassVar[str]
+    projectfile_extension: ClassVar[str] | None = None
 
     _registry: ClassVar[dict[str, Self]] = {}
+    _projectfiles: ClassVar[dict[str, Self]] = {}
 
     def __init_subclass__(cls) -> None:
-        cls._registry[cls.extension] = cls()
+        instance = cls()
+        extensions = cls.extension if isinstance(cls.extension, tuple) else [cls.extension]
+        for extension in extensions:
+            cls._registry[extension] = instance
+        if cls.projectfile_extension:
+            cls._projectfiles[cls.projectfile_extension] = instance
 
-    def build_commands(self, sources: list[Path]) -> Iterable[list[str]]:
+    def build_commands(self, sources: list[Path], entrypoint: Path) -> Iterable[list[str]]:
         return []
 
     @abstractmethod
@@ -52,7 +52,7 @@ class Java(Language):
     extension = ".java"
     docker_image = "maven:latest"
 
-    def build_commands(self, sources: list[Path]) -> Iterable[list[str]]:
+    def build_commands(self, sources: list[Path], entrypoint: Path) -> Iterable[list[str]]:
         yield ["javac", "-d", COMPILED.as_posix(), *(source.as_posix() for source in sources)]
 
     def run_command(self, entrypoint: Path) -> list[str]:
@@ -65,7 +65,7 @@ class C(Language):
 
     main_path = COMPILED.joinpath("main").as_posix()
 
-    def build_commands(self, sources: list[Path]) -> Iterable[list[str]]:
+    def build_commands(self, sources: list[Path], entrypoint: Path) -> Iterable[list[str]]:
         yield ["gcc", "-o", self.main_path, *(f.as_posix() for f in sources)]
 
     def run_command(self, entrypoint: Path) -> list[str]:
@@ -75,9 +75,29 @@ class C(Language):
 class CPP(C):
     extension = ".cpp"
 
-    def build_commands(self, sources: list[Path]) -> Iterable[list[str]]:
-        for _, *args in super().build_commands(sources):
+    def build_commands(self, sources: list[Path], entrypoint: Path) -> Iterable[list[str]]:
+        for _, *args in super().build_commands(sources, entrypoint):
             yield ["g++", *args]
+
+
+class CSharp(Language):
+    extension = ".cs"
+    projectfile_extension = ".csproj"
+    docker_image = "mcr.microsoft.com/dotnet/sdk:8.0"
+
+    def build_commands(self, sources: list[Path], entrypoint: Path) -> Iterable[list[str]]:
+        yield [
+            "dotnet",
+            "build",
+            "--output",
+            COMPILED.as_posix(),
+            "--artifacts-path",
+            COMPILED.as_posix(),
+            entrypoint.parent.as_posix(),
+        ]
+
+    def run_command(self, entrypoint: Path) -> list[str]:
+        return ["dotnet", COMPILED.joinpath(f"{entrypoint.stem}.dll").as_posix()]
 
 
 @dataclass
@@ -90,7 +110,7 @@ class TMSimulator:
     @classmethod
     def gather_files(cls, path: Path, depth: int | None) -> Iterable[Path]:
         for file in path.iterdir():
-            if file.is_file() and file.suffix in Language._registry:
+            if file.is_file() and (file.suffix in Language._registry or file.suffix in Language._projectfiles):
                 yield file
             elif file.is_dir() and not file.name.startswith(".") and file.name != "__MACOSX":
                 yield from cls.gather_files(file, depth and depth - 1)
@@ -98,6 +118,10 @@ class TMSimulator:
     @classmethod
     def discover(cls, path: Path, depth: int | None = None) -> Self | list[Path]:
         files = [file.relative_to(path) for file in cls.gather_files(path, depth)]
+        with contextlib.suppress(StopIteration):
+            entrypoint = next(f for f in files if f.suffix in Language._projectfiles)
+            return cls(Language._projectfiles[entrypoint.suffix], path, files, entrypoint)
+
         for test in ("", "main", "sim", "program"):
             match [f for f in files if f.stem.lower().find(test) != -1]:
                 case []:
@@ -122,7 +146,7 @@ class TMSimulator:
             detach=True,
         )
         container.exec_run(f"mkdir {COMPILED.as_posix()}")
-        for command in lang.build_commands(self.files):
+        for command in lang.build_commands(self.files, self.entrypoint):
             exit_code, output = container.exec_run(command, workdir=CODE.as_posix())
             if exit_code:
                 raise RuntimeError(output.decode("utf-8"))
