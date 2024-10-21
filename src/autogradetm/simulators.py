@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import contextlib
+import tomllib
 from abc import abstractmethod
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, Self
+from typing import ClassVar, Literal, Self
 
 from docker import DockerClient
 from docker.models.containers import Container as DockerContainer
@@ -20,7 +21,7 @@ TMS = Path("/TMs/")
 class Language:
     extension: ClassVar[str | tuple[str, ...]]
     docker_image: ClassVar[str]
-    projectfile_extension: ClassVar[str] | None = None
+    projectfile: ClassVar[str] | None = None
 
     _registry: ClassVar[dict[str, Self]] = {}
     _projectfiles: ClassVar[dict[str, Self]] = {}
@@ -30,21 +31,31 @@ class Language:
         extensions = cls.extension if isinstance(cls.extension, tuple) else [cls.extension]
         for extension in extensions:
             cls._registry[extension] = instance
-        if cls.projectfile_extension:
-            cls._projectfiles[cls.projectfile_extension] = instance
+        if cls.projectfile:
+            cls._projectfiles[cls.projectfile] = instance
 
     def build_commands(self, sources: list[Path], entrypoint: Path) -> Iterable[list[str]]:
         return []
 
     @abstractmethod
-    def run_command(self, entrypoint: Path) -> list[str]: ...
+    def run_command(self, entrypoint: Path, base_path: Path) -> list[str]: ...
+
+    @classmethod
+    def identify(cls, file: Path, type: Literal["any", "code", "projectfile"] = "any") -> Self | None:
+        if type in ("any", "code") and file.suffix in cls._registry:
+            return cls._registry[file.suffix]
+        if type in ("any", "projectfile"):
+            if file.suffix in cls._projectfiles:
+                return cls._projectfiles[file.suffix]
+            if file.name in cls._projectfiles:
+                return cls._projectfiles[file.name]
 
 
 class Python(Language):
     extension = ".py"
     docker_image = "python:3.13"
 
-    def run_command(self, entrypoint: Path) -> list[str]:
+    def run_command(self, entrypoint: Path, base_path: Path) -> list[str]:
         return ["python", CODE.joinpath(entrypoint).as_posix()]
 
 
@@ -55,7 +66,7 @@ class Java(Language):
     def build_commands(self, sources: list[Path], entrypoint: Path) -> Iterable[list[str]]:
         yield ["javac", "-d", COMPILED.as_posix(), *(source.as_posix() for source in sources)]
 
-    def run_command(self, entrypoint: Path) -> list[str]:
+    def run_command(self, entrypoint: Path, base_path: Path) -> list[str]:
         return ["java", "-cp", COMPILED.as_posix(), entrypoint.stem]
 
 
@@ -68,7 +79,7 @@ class C(Language):
     def build_commands(self, sources: list[Path], entrypoint: Path) -> Iterable[list[str]]:
         yield ["gcc", "-o", self.main_path, *(f.as_posix() for f in sources)]
 
-    def run_command(self, entrypoint: Path) -> list[str]:
+    def run_command(self, entrypoint: Path, base_path: Path) -> list[str]:
         return [self.main_path]
 
 
@@ -82,7 +93,7 @@ class CPP(C):
 
 class CSharp(Language):
     extension = ".cs"
-    projectfile_extension = ".csproj"
+    projectfile = ".csproj"
     docker_image = "mcr.microsoft.com/dotnet/sdk:8.0"
 
     def build_commands(self, sources: list[Path], entrypoint: Path) -> Iterable[list[str]]:
@@ -96,8 +107,22 @@ class CSharp(Language):
             entrypoint.parent.as_posix(),
         ]
 
-    def run_command(self, entrypoint: Path) -> list[str]:
+    def run_command(self, entrypoint: Path, base_path: Path) -> list[str]:
         return ["dotnet", COMPILED.joinpath(f"{entrypoint.stem}.dll").as_posix()]
+
+
+class Rust(Language):
+    extension = ".rs"
+    projectfile = "Cargo.toml"
+    docker_image = "rust"
+
+    def build_commands(self, sources: list[Path], entrypoint: Path) -> Iterable[list[str]]:
+        yield ["cargo", "build", "--target-dir", COMPILED.as_posix(), "--manifest-path", entrypoint.as_posix(), "-r"]
+
+    def run_command(self, entrypoint: Path, base_path: Path) -> list[str]:
+        toml = tomllib.loads(base_path.joinpath(entrypoint).read_text())
+        name = toml["package"]["name"]
+        return [COMPILED.joinpath("release").joinpath(name).as_posix()]
 
 
 @dataclass
@@ -110,7 +135,7 @@ class TMSimulator:
     @classmethod
     def gather_files(cls, path: Path, depth: int | None) -> Iterable[Path]:
         for file in path.iterdir():
-            if file.is_file() and (file.suffix in Language._registry or file.suffix in Language._projectfiles):
+            if file.is_file() and Language.identify(file):
                 yield file
             elif file.is_dir() and not file.name.startswith(".") and file.name != "__MACOSX":
                 yield from cls.gather_files(file, depth and depth - 1)
@@ -119,8 +144,9 @@ class TMSimulator:
     def discover(cls, path: Path, depth: int | None = None) -> Self | list[Path]:
         files = [file.relative_to(path) for file in cls.gather_files(path, depth)]
         with contextlib.suppress(StopIteration):
-            entrypoint = next(f for f in files if f.suffix in Language._projectfiles)
-            return cls(Language._projectfiles[entrypoint.suffix], path, files, entrypoint)
+            entrypoints = [(f, Language.identify(f, "projectfile")) for f in files]
+            entrypoint, lang = next((f, lang) for f, lang in entrypoints if lang)
+            return cls(lang, path, files, entrypoint)
 
         for test in ("", "main", "sim", "program"):
             match [f for f in files if f.stem.lower().find(test) != -1]:
@@ -136,7 +162,7 @@ class TMSimulator:
 
     def build(self, client: DockerClient, tms_folder: Path) -> BuiltSimulator:
         lang = self.language
-        source_mount = Mount(CODE.as_posix(), str(self.root_folder.absolute()), type="bind", read_only=True)
+        source_mount = Mount(CODE.as_posix(), str(self.root_folder.absolute()), type="bind", read_only=False)
         tms_mount = Mount(TMS.as_posix(), str(tms_folder.absolute()), type="bind", read_only=True)
         container = client.containers.run(
             lang.docker_image,
@@ -174,7 +200,7 @@ class BuiltSimulator(TMSimulator):
         self.container.remove(force=True)
 
     def run(self, tm_name: str, input: str) -> str:
-        command = [*self.language.run_command(self.entrypoint), f"{tm_name}.TM", input]
+        command = [*self.language.run_command(self.entrypoint, self.root_folder), f"{tm_name}.TM", input]
         _, gen = self.container.exec_run(command, workdir=TMS.as_posix(), demux=True, stream=True)
         with ThreadPoolExecutor() as exec:
             future = exec.submit(collect, gen)
