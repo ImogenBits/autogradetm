@@ -39,7 +39,7 @@ TESTS = [(name, input, tm := TM.get(name), tm(input, log_configs=True)[1]) for n
 
 
 def truncate(lines: list[str]) -> str:
-    return "\n".join(lines[:20]) + ("\n..." if len(lines) > 20 else "")
+    return "\n".join(lines[:22]) + ("\n  ⋮" if len(lines) > 22 else "")
 
 
 def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
@@ -67,7 +67,7 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
     for i, (good, bad) in enumerate(zip_longest(correct, err, fillvalue=" " * 9)):
         if good == bad:
             continue
-        res.append(f"{i}    {good:>}    {bad:>}")
+        res.append(f"{i: >3}    {good:>}    {bad:>}")
     return truncate(res)
 
 
