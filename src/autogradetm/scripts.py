@@ -200,15 +200,15 @@ TM_EXERCISES = [
     Exercise(
         4,
         ["vier", "four", "log"],
-        ["", "0", "10", "111", "010101"],
-        lambda i: len(bin(int(i, 2) - 1)),
+        ["0#0", "01#000", "1#1", "101#101", "0#111"],
+        lambda i: sum(int(x, 2) for x in i.split("#")),
         lambda o: int(o, 2),
     ),
     Exercise(
         5,
         ["fünf", "fuenf", "five", "count", "zähl", "zaehl"],
         ["", "10", "001", "010", "100001"],
-        lambda i: int(2 * i.count("0") == i.count("1")),
+        lambda i: int(i.count("0") == i.count("1")),
         lambda o: int(o[0]),
     ),
 ]
@@ -221,7 +221,7 @@ def format_configs(configs: list[Configuration], truncate: int | None = 20) -> s
     else:
         offset = 0
     out = [
-        "Configuration sequence:\n"
+        "Configuration sequence:\n",
         "[header]step    configuration[/]\n",
         "  ⋮\n" if offset else "",
         *(f"{i: >3}    {c:>}\n" for i, c in enumerate(configs, offset)),
@@ -239,26 +239,40 @@ def tms(
         tm_files = [f.relative_to(folder) for f in (collect_tms(folder))]
         for exercise in TM_EXERCISES:
             console.print(f"[header]Exercise {exercise.number}:")
-            patterns = [str(exercise.number), *exercise.identifiers]
-            match [f for f in tm_files if any(f.name.find(p) != -1 for p in patterns)]:
+            match tm_files:
                 case []:
-                    console.print("[error]Could not find any TM files for this exercise.")
-                    ret = Prompt.ask("You can manually specify a path to one or press enter to skip this test")
-                    if ret:
-                        tm_file = Path(ret)
-                    else:
-                        continue
+                    console.print("[error]Could not find any TM files.")
+                    continue
                 case [tm_file]:
                     pass
-                case candidates:
-                    tm_file = Path(
-                        Prompt.ask(
-                            "[attention]Could not uniquely identify a TM file for this exercise.[/]\n"
-                            "Please select the correct file manually",
-                            choices=[str(p) for p in candidates],
+                case _:
+                    patterns = [str(exercise.number), *exercise.identifiers]
+                    candidates = [f for f in tm_files if any(f.name.find(p) != -1 for p in patterns)]
+                    if len(candidates) == 1:
+                        tm_file = candidates[0]
+                    else:
+                        paths = candidates or tm_files
+                        parents = {p.parent for p in paths}
+                        if len(parents) == 1:
+                            parent = next(iter(parents))
+                            paths = [p.name for p in paths]
+                        else:
+                            parent = None
+                            paths = [str(p) for p in paths]
+
+                        ret = Prompt.ask(
+                            "[warning]Could not uniquely identify a TM file for this exercise.[/]\n"
+                            "Please select the correct file manually or skip this exercise",
+                            choices=["Skip", *paths],
                             show_choices=True,
+                            default="Skip",
+                            console=console,
                         )
-                    )
+                        if ret == "Skip":
+                            console.print("Skipping this exercise.")
+                            continue
+                        else:
+                            tm_file = parent.joinpath(ret) if parent else Path(ret)
             console.print(f"Using TM file '{tm_file}'.")
 
             try:
