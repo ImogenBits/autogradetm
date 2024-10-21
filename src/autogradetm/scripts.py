@@ -33,7 +33,7 @@ TEST_INPUTS = [
     ("invert", "0101"),
     ("invert", "111"),
 ]
-TESTS = [(name, input, tm :=TM.get(name), tm(input, "configs")) for name, input in TEST_INPUTS]
+TESTS = [(name, input, tm := TM.get(name), tm(input, "configs")) for name, input in TEST_INPUTS]
 
 
 def truncate(lines: list[str]) -> str:
@@ -121,10 +121,16 @@ def test_simulators(
             )
             simulator = TMSimulator(Language._registry[entrypoint.suffix], submission, simulator, entrypoint)
 
+        message_start = "B" if client.images.list(simulator.language.docker_image) else "Downloading and b"
         try:
-            simulator = simulator.build(client, TM_FOLDER)
+            with console.status(
+                f"[info]{message_start}uilding Docker image for {simulator.language.__class__.__name__}, "
+                f"this might take a bit."
+            ):
+                simulator = simulator.build(client, TM_FOLDER)
         except RuntimeError as e:
-            console.print(f"[error]Error when building submission code:[/]\n{e.args[0]}")
+            console.print("[error]Error when building submission code:[/]")
+            console.print(e.args[0], highlight=False, markup=False)
             continue
         with simulator:
             for tm_name, input, tm, correct in TESTS:
