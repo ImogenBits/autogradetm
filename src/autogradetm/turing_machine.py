@@ -113,7 +113,7 @@ class Tape:
     def read_right(self) -> Iterable[str]:
         return chain(
             (self._left[i] for i in range(-min(self._pos, 0) - 1, -1, -1)),
-            (self._right[i] for i in range(min(self._pos, 0))),
+            (self._right[i] for i in range(max(self._pos, 0), len(self._right))),
         )
 
 
