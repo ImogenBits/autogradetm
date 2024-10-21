@@ -56,7 +56,7 @@ class Configuration:
         for char in data:
             if (curr is num and char.isdigit()) or char in alphabet:
                 curr.append(char)
-            elif char in " .":
+            elif char in " ." or (curr is num and char == "q"):
                 continue
             elif char in "[|({":
                 curr = num
