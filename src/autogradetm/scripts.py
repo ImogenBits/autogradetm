@@ -200,15 +200,15 @@ TM_EXERCISES = [
     Exercise(
         4,
         ["vier", "four", "log"],
-        ["0#0", "01#000", "1#1", "101#101", "0#111"],
-        lambda i: sum(int(x, 2) for x in i.split("#")),
+        ["", "0", "10", "111", "010101"],
+        lambda i: len(bin(int(i, 2) - 1)),
         lambda o: int(o, 2),
     ),
     Exercise(
         5,
         ["fünf", "fuenf", "five", "count", "zähl", "zaehl"],
-        ["", "10", "001", "010", "100001"],
-        lambda i: int(i.count("0") == i.count("1")),
+        ["", "10", "001", "110100101111", "110101011001"],
+        lambda i: int(2 * i.count("0") == i.count("1")),
         lambda o: int(o[0]),
     ),
 ]
