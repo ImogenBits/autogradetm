@@ -201,7 +201,7 @@ TM_EXERCISES = [
     Exercise(
         4,
         ["vier", "four", "log"],
-        ["", "0", "10", "111", "010101"],
+        ["", "0", "10", "001", "11010110"],
         lambda i: len(bin(max(0, int(i, 2) - 1))) if i else 0,
         lambda o: int(o, 2),
     ),
