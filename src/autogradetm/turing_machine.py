@@ -72,7 +72,7 @@ class Tape:
 
     def __init__(self, input: str) -> None:
         self._left = []
-        self._right = list(input)
+        self._right = list(input) if input else ["B"]
         self._pos = 0
 
     def read(self) -> str:
@@ -126,18 +126,19 @@ class TM:
     _cache: ClassVar[dict[str, Self]] = {}
 
     def __post_init__(self) -> None:
-        assert 1 <= self.start <= self.num_states
-        assert 1 <= self.end <= self.num_states
-        assert self.input_alphabet < self.tape_alphabet
-        assert "B" not in self.input_alphabet
-        assert "B" in self.tape_alphabet
-        assert all(
-            state != self.end and 1 <= state <= self.num_states and symbol in self.tape_alphabet
-            for state, symbol in self.trans
-        )
-        assert all(
-            1 <= state <= self.num_states and symbol in self.tape_alphabet for state, symbol, _ in self.trans.values()
-        )
+        assert 1 <= self.start <= self.num_states, f"Start state {self.start} bigger than total {self.num_states}."
+        assert 1 <= self.end <= self.num_states, f"End state {self.end} bigger than total {self.num_states}"
+        assert "B" not in self.input_alphabet, f"Blank symbol in input alphabet {self.input_alphabet}"
+        if not self.input_alphabet < self.tape_alphabet:
+            self.tape_alphabet |= self.input_alphabet
+        if "B" not in self.tape_alphabet:
+            self.tape_alphabet.add("B")
+        for (state, symbol), (tar, write, _) in self.trans.items():
+            assert state != self.end, f"Transition '{(state, symbol)}' starts from the ending state"
+            assert 1 <= state <= self.num_states, f"Transition '{(state, symbol)}' starts from a nonexistent state"
+            assert symbol in self.tape_alphabet, f"Transition '{(state, symbol)}' starts from a nonexistent symbol"
+            assert 1 <= tar <= self.num_states, f"Transition '{(state, symbol)}' goes to a nonexistent state {tar}"
+            assert write in self.tape_alphabet, f"Transition '{(state, symbol)}' writes a nonexistent letter {write}"
 
     @classmethod
     def from_spec(cls, spec: str) -> Self:
@@ -180,7 +181,7 @@ class TM:
             tape.move(direction)
             step += 1
             if step >= 1_000_000:
-                raise RuntimeError
+                raise TimeoutError
             if output == "configs":
                 configs.append(tape.configuration(state))
         if output == "result":

@@ -1,4 +1,6 @@
 import operator
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
 from itertools import islice, zip_longest
 from pathlib import Path
 from typing import Annotated
@@ -69,6 +71,37 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
     return truncate(res)
 
 
+@dataclass
+class ProcessSubmissions:
+    folder: Path
+
+    def __iter__(self) -> Iterator[tuple[Path, int]]:
+        sorted_submissions = sorted(
+            (
+                (f, int(f.name.split()[3].split("_")[0]))
+                for f in self.folder.iterdir()
+                if f.is_dir() or f.suffix == ".zip"
+            ),
+            key=operator.itemgetter(1),
+        )
+        for submission, group in sorted_submissions:
+            if group != sorted_submissions[0][1]:
+                response = Confirm.ask(f"Do you want to continue with group {group}?", default="y")
+                if not response:
+                    raise Abort
+
+            console.print(f"[heading]Processing submission of group {group}")
+            if submission.is_file():
+                with ZipFile(submission) as zipped:
+                    tmp = self.folder / "__tmp__"
+                    tmp.mkdir()
+                    zipped.extractall(tmp)
+                submission.unlink()
+                tmp.rename(submission.with_suffix(""))
+
+            yield submission, group
+
+
 @app.command(name="simulators")
 def test_simulators(
     assignment_submissions: Annotated[
@@ -82,29 +115,7 @@ def test_simulators(
         console.print_exception()
         raise Abort from e
 
-    submission_folders = sorted(
-        (
-            (f, int(f.name.split()[3].split("_")[0]))
-            for f in assignment_submissions.iterdir()
-            if f.is_dir() or f.suffix == ".zip"
-        ),
-        key=operator.itemgetter(1),
-    )
-    for submission, group in submission_folders:
-        if group != submission_folders[0][1]:
-            response = Confirm.ask(f"Do you want to continue with group {group}?", default="y")
-            if not response:
-                raise Abort
-
-        console.print(f"[heading]Processing submission of group {group}")
-        if submission.is_file():
-            with ZipFile(submission) as zipped:
-                tmp = assignment_submissions / "__tmp__"
-                tmp.mkdir()
-                zipped.extractall(tmp)
-            submission.unlink()
-            tmp.rename(submission.with_suffix(""))
-
+    for submission, group in ProcessSubmissions(assignment_submissions):
         simulator = TMSimulator.discover(submission)
         if not simulator:
             console.print(f"[error]Could not find any code files in {submission.name}[/].")
@@ -168,8 +179,98 @@ def test_simulators(
         console.print(f"[success]Finished testing group {group}.")
 
 
+def collect_tms(path: Path) -> Iterable[Path]:
+    if path.is_file() and path.suffix == ".TM":
+        yield path
+    elif path.is_dir() and not path.name.startswith(".") and path.name != "__MACOSX":
+        for child in path.iterdir():
+            yield from collect_tms(child)
+
+
+@dataclass
+class Exercise[T]:
+    number: int
+    identifiers: list[str]
+    data: list[str]
+    correct: Callable[[str], T]
+    parse: Callable[[str], T]
+
+
+TM_EXERCISES = [
+    Exercise(
+        4,
+        ["vier", "four", "log"],
+        ["", "0", "10", "111", "010101"],
+        lambda i: len(bin(int(i, 2) - 1)),
+        lambda o: int(o, 2),
+    ),
+    Exercise(
+        5,
+        ["fünf", "fuenf", "five", "count", "zähl", "zaehl"],
+        ["", "10", "001", "010", "100001"],
+        lambda i: int(2 * i.count("0") == i.count("1")),
+        lambda o: int(o[0]),
+    ),
+]
+
+
 @app.command()
-def blep(): ...
+def tms(
+    assignment_submissions: Annotated[
+        Path, Argument(help="Path to the folder containing every student's submissions.")
+    ],
+):
+    for folder, _ in ProcessSubmissions(assignment_submissions):
+        tm_files = [f.relative_to(folder) for f in (collect_tms(folder))]
+        for exercise in TM_EXERCISES:
+            console.print(f"[header]Exercise {exercise.number}:")
+            patterns = [str(exercise.number), *exercise.identifiers]
+            match [f for f in tm_files if any(f.name.find(p) != -1 for p in patterns)]:
+                case []:
+                    console.print("[error]Could not find any TM files for this exercise.")
+                    ret = Prompt.ask("You can manually specify a path to one or press enter to skip this test")
+                    if ret:
+                        tm_file = Path(ret)
+                    else:
+                        continue
+                case [tm_file]:
+                    pass
+                case candidates:
+                    tm_file = Path(
+                        Prompt.ask(
+                            "[attention]Could not uniquely identify a TM file for this exercise.[/]\n"
+                            "Please select the correct file manually",
+                            choices=[str(p) for p in candidates],
+                            show_choices=True,
+                        )
+                    )
+            console.print(f"Using TM file '{tm_file}'.")
+
+            try:
+                tm = TM.from_spec(folder.joinpath(tm_file).read_text())
+            except (ValueError, AssertionError) as e:
+                console.print(f"[error]The TM file is formatted incorrectly:[/]\n{e}")
+                continue
+            for input in exercise.data:
+                console.print(f"[header]Testing TM on input '{input}':")
+                try:
+                    output = tm(input)
+                except KeyError as e:
+                    console.print(f"[error]The TM file is missing a needed transition: {e.args[0]}.")
+                    continue
+                except TimeoutError:
+                    console.print("[error]The TM is stuck in an infinite loop.")
+                    continue
+                correct = exercise.correct(input)
+                try:
+                    parsed = exercise.parse(output)
+                except ValueError:
+                    console.print(f"[error]The TM produces incorrect output '{output}'")
+                    continue
+                if parsed == correct:
+                    console.print("[success]The TM runs correctly.")
+                else:
+                    console.print(f"[error]The TM outputs '{output}' instead of '{correct}'.")
 
 
 if __name__ == "__main__":
