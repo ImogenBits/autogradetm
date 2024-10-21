@@ -130,6 +130,9 @@ def test_simulators(
             for tm_name, input, tm, correct in TESTS:
                 try:
                     res = simulator.run(tm_name, input)
+                except TimeoutError as e:
+                    console.print(f"[warning]Simulating TM '{tm_name}' on input '{input}' ran into a timeout.")
+                    res = e.args[0]
                 except ValueError as e:
                     console.print(
                         f"[error]An error occured when simulating TM '{tm_name}' on input '{input}':[/]\n"

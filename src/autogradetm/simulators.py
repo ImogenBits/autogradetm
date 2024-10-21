@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from time import perf_counter
 from typing import ClassVar, Self
 
 from docker import DockerClient
@@ -129,6 +129,16 @@ class TMSimulator:
         return BuiltSimulator(self.language, self.root_folder, self.files, self.entrypoint, container)
 
 
+def collect(stream: Iterable[tuple[bytes, bytes]]) -> tuple[str, str]:
+    out, err = [], []
+    for out_chunk, err_chunk in stream:
+        if out_chunk:
+            out.append(out_chunk)
+        if err_chunk:
+            err.append(err_chunk)
+    return b"".join(out[:1000]).decode(), b"".join(err).decode()
+
+
 @dataclass
 class BuiltSimulator(TMSimulator):
     container: DockerContainer
@@ -142,20 +152,16 @@ class BuiltSimulator(TMSimulator):
     def run(self, tm_name: str, input: str) -> str:
         command = [*self.language.run_command(self.entrypoint), f"{tm_name}.TM", input]
         _, gen = self.container.exec_run(command, workdir=TMS.as_posix(), demux=True, stream=True)
-        out, err = [], []
-        start = perf_counter()
-        for out_chunk, err_chunk in gen:
-            if out_chunk:
-                out.append(out_chunk)
-            if err_chunk:
-                err.append(err_chunk)
-            if perf_counter() > start + 5:
+        with ThreadPoolExecutor() as exec:
+            future = exec.submit(collect, gen)
+            try:
+                out, err = future.result(5)
+            except TimeoutError as e:
                 pid_out: str = self.container.exec_run("ps").output.decode()
                 pid = pid_out.splitlines()[1].split()[0].strip()
                 self.container.exec_run(["kill", "-9", pid])
-                out = out[:1000]
-                break
+                raise TimeoutError(future.result()[0]) from e
         if err:
-            raise ValueError(b" ".join(err).decode())
+            raise ValueError(err)
         else:
-            return b" ".join(out).decode()
+            return out
