@@ -173,7 +173,6 @@ class TM:
     def __call__(self, input: str, *, log_configs: Literal[True]) -> tuple[str, list[Configuration]]: ...
 
     def __call__(self, input: str, *, log_configs: bool = False) -> str | tuple[str, list[Configuration]]:
-        assert all(a in self.input_alphabet for a in input)
         tape = Tape(input)
         state = self.start
         step = 0
