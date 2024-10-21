@@ -97,7 +97,8 @@ class ProcessSubmissions:
                     tmp.mkdir()
                     zipped.extractall(tmp)
                 submission.unlink()
-                tmp.rename(submission.with_suffix(""))
+                submission = submission.with_suffix("")
+                tmp.rename(submission)
 
             yield submission, group
 
