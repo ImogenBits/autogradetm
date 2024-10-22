@@ -116,13 +116,13 @@ def test_simulators(
         list[int],
         Option("--group", "-g", help="Group number to test. The default will instead test every group."),
     ] = [],  # noqa: B006
-    build_command: Annotated[
+    compile_command: Annotated[
         str,
         Option(
-            "--build-command",
-            "-b",
+            "--compile-command",
+            "-c",
             help=f"Custom build command to use. Will be executed from the '{CODE.as_posix()}' folder containing the "
-            f"submission files and should place build artifacts and compilation results in '{COMPILED.as_posix()}'.",
+            f"submission files and should place build artifacts in '{COMPILED.as_posix()}'.",
         ),
     ] = "",
     run_command: Annotated[
@@ -145,14 +145,14 @@ def test_simulators(
         raise Abort from e
 
     for submission, group in ProcessSubmissions(assignment_submissions, only_groups):
-        test_simulator_group(submission, group, client, build_command, run_command)
+        test_simulator_group(submission, group, client, compile_command, run_command)
 
 
 def test_simulator_group(
     submission: Path,
     group: int,
     client: DockerClient,
-    build_command: str | None = None,
+    compile_command: str | None = None,
     run_command: str | None = None,
 ) -> None:
     simulator = TMSimulator.discover(submission)
@@ -171,13 +171,14 @@ def test_simulator_group(
         )
         simulator = TMSimulator(Language._registry[entrypoint.suffix], submission, simulator, entrypoint)
 
-    message_start = "B" if client.images.list(simulator.language.docker_image) else "Downloading and b"
+    message_start = (
+        "C"
+        if client.images.list(simulator.language.docker_image)
+        else f"Downloading {simulator.language.__class__.__name__} image and c"
+    )
     try:
-        with console.status(
-            f"[info]{message_start}uilding Docker image for {simulator.language.__class__.__name__}, "
-            f"this might take a bit."
-        ):
-            simulator = simulator.build(client, TM_FOLDER, build_command)
+        with console.status(f"[info]{message_start}ompiling files, this might take a bit."):
+            simulator = simulator.build(client, TM_FOLDER, compile_command)
     except RuntimeError as e:
         console.print("[error]Error when building submission code:[/]")
         console.print(e.args[0], highlight=False, markup=False)

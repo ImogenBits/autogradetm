@@ -24,7 +24,7 @@ läuft oder was die Fehler sind.
     der Datei eingeben die die main Funktion enthält (o.ä. bei Sprachen die das anders machen).
 
     - Falls Fehler beim Kompilieren oder Ausführen angezeigt werden ist entweder der Studi Code falsch oder man muss
-    deren Sachen auf ne weirde Art ausführen. In letzterem Fall kann man die `--build-command/-b` und `--run-command/-r`
+    deren Sachen auf ne weirde Art ausführen. In letzterem Fall kann man die `--compile-command/-c` und `--run-command/-r`
     Optionen benutzen (sinnvollerweise nur wenn man nur diese einzelne Gruppe testet). Die nehmen strings die statt den
     automatischen Befehlen benutzt werden um den Code zu compilen bzw. auszuführen. Details dazu sind auch in den
     `--help` docs.
