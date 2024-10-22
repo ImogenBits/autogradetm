@@ -72,17 +72,16 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
     return truncate(res)
 
 
-def process_submissions(folder: Path, groups: Iterable[int] = ()) -> Iterator[tuple[Path, int]]:
+def process_submissions(
+    folder: Path, groups: Iterable[int] = (), *, groups_from: bool = False
+) -> Iterator[tuple[Path, int]]:
     sorted_submissions = sorted(
-        (
-            (f, int(f.name.split()[1].split("_")[0]))
-            for f in folder.iterdir()
-            if f.is_dir() or f.suffix == ".zip"
-        ),
+        ((f, int(f.name.split()[1].split("_")[0])) for f in folder.iterdir() if f.is_dir() or f.suffix == ".zip"),
         key=operator.itemgetter(1),
     )
     if groups:
-        sorted_submissions = [(p, g) for p, g in sorted_submissions if g in groups]
+        first = min(groups, default=0)
+        sorted_submissions = [(p, g) for p, g in sorted_submissions if (g >= first if groups_from else g in groups)]
     for submission, group in sorted_submissions:
         if group != sorted_submissions[0][1]:
             response = Confirm.ask(f"Do you want to continue with group {group}?", default="y")
@@ -107,10 +106,20 @@ def test_simulators(
     assignment_submissions: Annotated[
         Path, Argument(help="Path to the folder containing every student's submissions.")
     ],
+    *,
     only_groups: Annotated[
         list[int],
         Option("--group", "-g", help="Group number to test. The default will instead test every group."),
     ] = [],  # noqa: B006
+    groups_from: Annotated[
+        bool,
+        Option(
+            "--from",
+            "-f",
+            help="When used in combination with the '--group' option, setting this flag will also test groups with "
+            "bigger numbers than the specified.",
+        ),
+    ] = False,
     compile_command: Annotated[
         str,
         Option(
@@ -139,7 +148,7 @@ def test_simulators(
         console.print_exception()
         raise Abort from e
 
-    for submission, group in process_submissions(assignment_submissions, only_groups):
+    for submission, group in process_submissions(assignment_submissions, only_groups, groups_from=groups_from):
         test_simulator_group(submission, group, client, compile_command, run_command)
 
 
@@ -269,13 +278,23 @@ def tms(
     assignment_submissions: Annotated[
         Path, Argument(help="Path to the folder containing every student's submissions.")
     ],
+    *,
     only_groups: Annotated[
         list[int],
         Option("--group", "-g", help="Group number to test. The default will instead test every group."),
     ] = [],  # noqa: B006
+    groups_from: Annotated[
+        bool,
+        Option(
+            "--from",
+            "-f",
+            help="When used in combination with the '--group' option, setting this flag will also test groups with "
+            "bigger numbers than the specified.",
+        ),
+    ] = False,
 ):
     only_groups = only_groups or []
-    for folder, _ in process_submissions(assignment_submissions, only_groups):
+    for folder, _ in process_submissions(assignment_submissions, only_groups, groups_from=groups_from):
         test_tms_single_group(folder)
 
 
