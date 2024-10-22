@@ -80,7 +80,7 @@ class ProcessSubmissions:
     def __iter__(self) -> Iterator[tuple[Path, int]]:
         sorted_submissions = sorted(
             (
-                (f, int(f.name.split()[3].split("_")[0]))
+                (f, int(f.name.split()[1].split("_")[0]))
                 for f in self.folder.iterdir()
                 if f.is_dir() or f.suffix == ".zip"
             ),
@@ -344,8 +344,10 @@ def test_tms_single_group(folder: Path):
             correct = exercise.correct(input)
             try:
                 parsed = exercise.parse(output)
-            except ValueError:
-                console.print(f"[error]The TM produces invalid output '{output}'")
+            except (ValueError, IndexError):
+                console.print(
+                    f"[error]The TM produces invalid output '{output}' instead of '{exercise.format(correct)}'."
+                )
                 console.print(format_configs(configs))
                 continue
             if parsed == correct:
