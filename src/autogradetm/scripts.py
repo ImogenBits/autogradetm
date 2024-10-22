@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Annotated
 from zipfile import ZipFile
 
-from docker import from_env
+from docker import DockerClient, from_env
 from docker.errors import APIError, DockerException
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.theme import Theme
-from typer import Abort, Argument, Typer
+from typer import Abort, Argument, Option, Typer
 
 from autogradetm.simulators import Language, TMSimulator
 from autogradetm.turing_machine import TM, TM_FOLDER, Configuration
@@ -74,6 +74,7 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
 @dataclass
 class ProcessSubmissions:
     folder: Path
+    groups: Iterable[int] = ()
 
     def __iter__(self) -> Iterator[tuple[Path, int]]:
         sorted_submissions = sorted(
@@ -84,6 +85,8 @@ class ProcessSubmissions:
             ),
             key=operator.itemgetter(1),
         )
+        if self.groups:
+            sorted_submissions = [(p, g) for p, g in sorted_submissions if g in self.groups]
         for submission, group in sorted_submissions:
             if group != sorted_submissions[0][1]:
                 response = Confirm.ask(f"Do you want to continue with group {group}?", default="y")
@@ -108,7 +111,12 @@ def test_simulators(
     assignment_submissions: Annotated[
         Path, Argument(help="Path to the folder containing every student's submissions.")
     ],
+    only_groups: Annotated[
+        list[int],
+        Option("--group", "-g", help="Group number to test. The default will instead test every group."),
+    ] = [], # noqa: B006
 ):
+    only_groups = only_groups or []
     try:
         client = from_env()
     except (DockerException, APIError) as e:
@@ -116,68 +124,69 @@ def test_simulators(
         console.print_exception()
         raise Abort from e
 
-    for submission, group in ProcessSubmissions(assignment_submissions):
-        simulator = TMSimulator.discover(submission)
-        if not simulator:
-            console.print(f"[error]Could not find any code files in {submission.name}[/].")
-            continue
-        if isinstance(simulator, list):
-            entrypoint = Path(
-                Prompt.ask(
-                    "[error]Could not find a definitive main file.\n"
-                    "[/]Please manually select which file is the entrypoint",
-                    choices=[str(s) for s in simulator],
-                    console=console,
-                    show_choices=True,
-                )
+    for submission, group in ProcessSubmissions(assignment_submissions, only_groups):
+        test_simulator_group(submission, group, client)
+
+
+def test_simulator_group(submission: Path, group: int, client: DockerClient) -> None:
+    simulator = TMSimulator.discover(submission)
+    if not simulator:
+        console.print(f"[error]Could not find any code files in {submission.name}[/].")
+        return
+    if isinstance(simulator, list):
+        entrypoint = Path(
+            Prompt.ask(
+                "[error]Could not find a definitive main file.\n"
+                "[/]Please manually select which file is the entrypoint",
+                choices=[str(s) for s in simulator],
+                console=console,
+                show_choices=True,
             )
-            simulator = TMSimulator(Language._registry[entrypoint.suffix], submission, simulator, entrypoint)
+        )
+        simulator = TMSimulator(Language._registry[entrypoint.suffix], submission, simulator, entrypoint)
 
-        message_start = "B" if client.images.list(simulator.language.docker_image) else "Downloading and b"
-        try:
-            with console.status(
-                f"[info]{message_start}uilding Docker image for {simulator.language.__class__.__name__}, "
-                f"this might take a bit."
-            ):
-                simulator = simulator.build(client, TM_FOLDER)
-        except RuntimeError as e:
-            console.print("[error]Error when building submission code:[/]")
-            console.print(e.args[0], highlight=False, markup=False)
-            continue
-        with simulator:
-            for tm_name, input, tm, correct in TESTS:
+    message_start = "B" if client.images.list(simulator.language.docker_image) else "Downloading and b"
+    try:
+        with console.status(
+            f"[info]{message_start}uilding Docker image for {simulator.language.__class__.__name__}, "
+            f"this might take a bit."
+        ):
+            simulator = simulator.build(client, TM_FOLDER)
+    except RuntimeError as e:
+        console.print("[error]Error when building submission code:[/]")
+        console.print(e.args[0], highlight=False, markup=False)
+        return
+    with simulator:
+        for tm_name, input, tm, correct in TESTS:
+            try:
+                res = simulator.run(tm_name, input)
+            except TimeoutError as e:
+                console.print(f"[warning]Simulating TM '{tm_name}' on input '{input}' ran into a timeout.")
+                res = e.args[0]
+            except ValueError as e:
+                console.print(
+                    f"[error]An error occured when simulating TM '{tm_name}' on input '{input}':[/]\n{e.args[0]}"
+                )
+                continue
+
+            parsed, incorrect_lines = list[Configuration](), list[str]()
+            for line in res.splitlines():
                 try:
-                    res = simulator.run(tm_name, input)
-                except TimeoutError as e:
-                    console.print(f"[warning]Simulating TM '{tm_name}' on input '{input}' ran into a timeout.")
-                    res = e.args[0]
-                except ValueError as e:
-                    console.print(
-                        f"[error]An error occured when simulating TM '{tm_name}' on input '{input}':[/]\n"
-                        f"{e.args[0]}"
-                    )
-                    continue
+                    parsed.append(Configuration.parse(line, tm.tape_alphabet))
+                except ValueError:
+                    incorrect_lines.append(line)
+            if parsed == correct:
+                console.print(f"[success]Correctly simulated TM '{tm_name}' on input '{input}'.")
+                continue
 
-                parsed, incorrect_lines = list[Configuration](), list[str]()
-                for line in res.splitlines():
-                    try:
-                        parsed.append(Configuration.parse(line, tm.tape_alphabet))
-                    except ValueError:
-                        incorrect_lines.append(line)
-                if parsed == correct:
-                    console.print(f"[success]Correctly simulated TM '{tm_name}' on input '{input}'.")
-                    continue
-
-                console.print(f"[error]Simulating TM '{tm_name}' on input '{input}' produced incorrect results:")
-                if incorrect_lines:
-                    console.print(
-                        "The following lines could not be parsed as TM configs:\n" + "\n".join(incorrect_lines)
-                    )
-                if not parsed:
-                    console.print("[error]The output does not contain any TM configurations.")
-                else:
-                    console.print(get_diff(correct, parsed), highlight=False)
-        console.print(f"[success]Finished testing group {group}.")
+            console.print(f"[error]Simulating TM '{tm_name}' on input '{input}' produced incorrect results:")
+            if incorrect_lines:
+                console.print("The following lines could not be parsed as TM configs:\n" + "\n".join(incorrect_lines))
+            if not parsed:
+                console.print("[error]The output does not contain any TM configurations.")
+            else:
+                console.print(get_diff(correct, parsed), highlight=False)
+    console.print(f"[success]Finished testing group {group}.")
 
 
 def collect_tms(path: Path) -> Iterable[Path]:
@@ -235,76 +244,84 @@ def tms(
     assignment_submissions: Annotated[
         Path, Argument(help="Path to the folder containing every student's submissions.")
     ],
+    only_groups: Annotated[
+        list[int],
+        Option("--group", "-g", help="Group number to test. The default will instead test every group."),
+    ] = [], # noqa: B006
 ):
-    for folder, _ in ProcessSubmissions(assignment_submissions):
-        tm_files = [f.relative_to(folder) for f in (collect_tms(folder))]
-        for exercise in TM_EXERCISES:
-            console.print(f"[header]Exercise {exercise.number}:")
-            match tm_files:
-                case []:
-                    console.print("[error]Could not find any TM files.")
-                    continue
-                case [tm_file]:
-                    pass
-                case _:
-                    patterns = [str(exercise.number), *exercise.identifiers]
-                    candidates = [f for f in tm_files if any(f.name.find(p) != -1 for p in patterns)]
-                    if len(candidates) == 1:
-                        tm_file = candidates[0]
-                    else:
-                        paths = candidates or tm_files
-                        parents = {p.parent for p in paths}
-                        if len(parents) == 1:
-                            parent = next(iter(parents))
-                            paths = [p.name for p in paths]
-                        else:
-                            parent = None
-                            paths = [str(p) for p in paths]
+    only_groups = only_groups or []
+    for folder, _ in ProcessSubmissions(assignment_submissions, only_groups):
+        test_tms_single_group(folder)
 
-                        ret = Prompt.ask(
-                            "[warning]Could not uniquely identify a TM file for this exercise.[/]\n"
-                            "Please select the correct file manually or skip this exercise",
-                            choices=["Skip", *paths],
-                            show_choices=True,
-                            default="Skip",
-                            console=console,
-                        )
-                        if ret == "Skip":
-                            console.print("Skipping this exercise.")
-                            continue
-                        else:
-                            tm_file = parent.joinpath(ret) if parent else Path(ret)
-            console.print(f"Using TM file '{tm_file}'.")
-
-            try:
-                tm = TM.from_spec(folder.joinpath(tm_file).read_text())
-            except (ValueError, AssertionError) as e:
-                console.print(f"[error]The TM file is formatted incorrectly:[/]\n{e}")
+def test_tms_single_group(folder: Path):
+    tm_files = [f.relative_to(folder) for f in (collect_tms(folder))]
+    for exercise in TM_EXERCISES:
+        console.print(f"[header]Exercise {exercise.number}:")
+        match tm_files:
+            case []:
+                console.print("[error]Could not find any TM files.")
                 continue
-            for input in exercise.data:
-                console.print(f"[header]Testing TM on input '{input}':")
-                try:
-                    output, configs = tm(input, log_configs=True)
-                except KeyError as e:
-                    console.print(f"[error]The TM file is missing a needed transition: {e.args[0]}.")
-                    console.print(format_configs(e.args[1]))
-                    continue
-                except TimeoutError as e:
-                    console.print("[error]The TM is stuck in an infinite loop.")
-                    console.print(format_configs(e.args[0]))
-                    continue
-                correct = exercise.correct(input)
-                try:
-                    parsed = exercise.parse(output)
-                except ValueError:
-                    console.print(f"[error]The TM produces invalid output '{output}'")
-                    console.print(format_configs(configs))
-                    continue
-                if parsed == correct:
-                    console.print("[success]The TM runs correctly.")
+            case [tm_file]:
+                pass
+            case _:
+                patterns = [str(exercise.number), *exercise.identifiers]
+                candidates = [f for f in tm_files if any(f.name.find(p) != -1 for p in patterns)]
+                if len(candidates) == 1:
+                    tm_file = candidates[0]
                 else:
-                    console.print(f"[error]The TM outputs '{output}' instead of '{correct}'.")
-                    console.print(format_configs(configs))
+                    paths = candidates or tm_files
+                    parents = {p.parent for p in paths}
+                    if len(parents) == 1:
+                        parent = next(iter(parents))
+                        paths = [p.name for p in paths]
+                    else:
+                        parent = None
+                        paths = [str(p) for p in paths]
+
+                    ret = Prompt.ask(
+                        "[warning]Could not uniquely identify a TM file for this exercise.[/]\n"
+                        "Please select the correct file manually or skip this exercise",
+                        choices=["Skip", *paths],
+                        show_choices=True,
+                        default="Skip",
+                        console=console,
+                    )
+                    if ret == "Skip":
+                        console.print("Skipping this exercise.")
+                        continue
+                    else:
+                        tm_file = parent.joinpath(ret) if parent else Path(ret)
+        console.print(f"Using TM file '{tm_file}'.")
+
+        try:
+            tm = TM.from_spec(folder.joinpath(tm_file).read_text())
+        except (ValueError, AssertionError) as e:
+            console.print(f"[error]The TM file is formatted incorrectly:[/]\n{e}")
+            continue
+        for input in exercise.data:
+            console.print(f"[header]Testing TM on input '{input}':")
+            try:
+                output, configs = tm(input, log_configs=True)
+            except KeyError as e:
+                console.print(f"[error]The TM file is missing a needed transition: {e.args[0]}.")
+                console.print(format_configs(e.args[1]))
+                continue
+            except TimeoutError as e:
+                console.print("[error]The TM is stuck in an infinite loop.")
+                console.print(format_configs(e.args[0]))
+                continue
+            correct = exercise.correct(input)
+            try:
+                parsed = exercise.parse(output)
+            except ValueError:
+                console.print(f"[error]The TM produces invalid output '{output}'")
+                console.print(format_configs(configs))
+                continue
+            if parsed == correct:
+                console.print("[success]The TM runs correctly.")
+            else:
+                console.print(f"[error]The TM outputs '{output}' instead of '{correct}'.")
+                console.print(format_configs(configs))
 
 
 if __name__ == "__main__":
