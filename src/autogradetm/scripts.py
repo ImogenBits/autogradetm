@@ -72,39 +72,34 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
     return truncate(res)
 
 
-@dataclass
-class ProcessSubmissions:
-    folder: Path
-    groups: Iterable[int] = ()
+def process_submissions(folder: Path, groups: Iterable[int] = ()) -> Iterator[tuple[Path, int]]:
+    sorted_submissions = sorted(
+        (
+            (f, int(f.name.split()[1].split("_")[0]))
+            for f in folder.iterdir()
+            if f.is_dir() or f.suffix == ".zip"
+        ),
+        key=operator.itemgetter(1),
+    )
+    if groups:
+        sorted_submissions = [(p, g) for p, g in sorted_submissions if g in groups]
+    for submission, group in sorted_submissions:
+        if group != sorted_submissions[0][1]:
+            response = Confirm.ask(f"Do you want to continue with group {group}?", default="y")
+            if not response:
+                raise Abort
 
-    def __iter__(self) -> Iterator[tuple[Path, int]]:
-        sorted_submissions = sorted(
-            (
-                (f, int(f.name.split()[1].split("_")[0]))
-                for f in self.folder.iterdir()
-                if f.is_dir() or f.suffix == ".zip"
-            ),
-            key=operator.itemgetter(1),
-        )
-        if self.groups:
-            sorted_submissions = [(p, g) for p, g in sorted_submissions if g in self.groups]
-        for submission, group in sorted_submissions:
-            if group != sorted_submissions[0][1]:
-                response = Confirm.ask(f"Do you want to continue with group {group}?", default="y")
-                if not response:
-                    raise Abort
+        console.print(f"[heading]Processing submission of group {group}")
+        if submission.is_file():
+            with ZipFile(submission) as zipped:
+                tmp = folder / "__tmp__"
+                tmp.mkdir()
+                zipped.extractall(tmp)
+            submission.unlink()
+            submission = submission.with_suffix("")
+            tmp.rename(submission)
 
-            console.print(f"[heading]Processing submission of group {group}")
-            if submission.is_file():
-                with ZipFile(submission) as zipped:
-                    tmp = self.folder / "__tmp__"
-                    tmp.mkdir()
-                    zipped.extractall(tmp)
-                submission.unlink()
-                submission = submission.with_suffix("")
-                tmp.rename(submission)
-
-            yield submission, group
+        yield submission, group
 
 
 @app.command(name="simulators")
@@ -144,7 +139,7 @@ def test_simulators(
         console.print_exception()
         raise Abort from e
 
-    for submission, group in ProcessSubmissions(assignment_submissions, only_groups):
+    for submission, group in process_submissions(assignment_submissions, only_groups):
         test_simulator_group(submission, group, client, compile_command, run_command)
 
 
@@ -280,7 +275,7 @@ def tms(
     ] = [],  # noqa: B006
 ):
     only_groups = only_groups or []
-    for folder, _ in ProcessSubmissions(assignment_submissions, only_groups):
+    for folder, _ in process_submissions(assignment_submissions, only_groups):
         test_tms_single_group(folder)
 
 
