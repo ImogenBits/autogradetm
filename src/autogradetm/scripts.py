@@ -2,6 +2,7 @@ import operator
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from itertools import islice, zip_longest
+from math import ceil, log2
 from pathlib import Path
 from typing import Annotated
 from zipfile import ZipFile
@@ -204,6 +205,7 @@ class Exercise[T]:
     data: list[str]
     correct: Callable[[str], T]
     parse: Callable[[str], T]
+    format: Callable[[T], str]
 
 
 TM_EXERCISES = [
@@ -211,8 +213,9 @@ TM_EXERCISES = [
         4,
         ["vier", "four", "log"],
         ["", "0", "10", "001", "11010110"],
-        lambda i: len(bin(max(0, int(i, 2) - 1))) if i else 0,
+        lambda i: ceil(log2(int(i, 2))) if i and int(i, 2) else 0,
         lambda o: int(o, 2),
+        lambda v: f"{v:b}",
     ),
     Exercise(
         5,
@@ -220,6 +223,7 @@ TM_EXERCISES = [
         ["", "10", "001", "110100101111", "110101011001"],
         lambda i: int(2 * i.count("0") == i.count("1")),
         lambda o: int(o[0]),
+        lambda v: f"{v:b}",
     ),
 ]
 
@@ -320,7 +324,7 @@ def test_tms_single_group(folder: Path):
             if parsed == correct:
                 console.print("[success]The TM runs correctly.")
             else:
-                console.print(f"[error]The TM outputs '{output}' instead of '{correct}'.")
+                console.print(f"[error]The TM outputs '{output}' instead of '{exercise.format(correct)}'.")
                 console.print(format_configs(configs))
 
 
