@@ -19,7 +19,7 @@ class Direction(IntEnum):
             case "L" | "N" | "R":
                 return getattr(cls, val)
             case _:
-                raise ValueError
+                raise ValueError(f"Invalid direction identifier: '{val}'")
 
 
 @dataclass
