@@ -14,7 +14,7 @@ from rich.prompt import Confirm, Prompt
 from rich.theme import Theme
 from typer import Abort, Argument, Option, Typer
 
-from autogradetm.simulators import Language, TMSimulator
+from autogradetm.simulators import CODE, COMPILED, TMS, Language, TMSimulator
 from autogradetm.turing_machine import TM, TM_FOLDER, Configuration
 
 app = Typer(pretty_exceptions_show_locals=True)
@@ -115,7 +115,26 @@ def test_simulators(
     only_groups: Annotated[
         list[int],
         Option("--group", "-g", help="Group number to test. The default will instead test every group."),
-    ] = [], # noqa: B006
+    ] = [],  # noqa: B006
+    build_command: Annotated[
+        str,
+        Option(
+            "--build-command",
+            "-b",
+            help=f"Custom build command to use. Will be executed from the '{CODE.as_posix()}' folder containing the "
+            f"submission files and should place build artifacts and compilation results in '{COMPILED.as_posix()}'.",
+        ),
+    ] = "",
+    run_command: Annotated[
+        str,
+        Option(
+            "--run-command",
+            "-r",
+            help=f"Custom run command to use. Will be executed from the '{TMS.as_posix()}' folder containing the TM "
+            f"files used in tests and can access code files in '{CODE.as_posix()}' and compile artifacts in "
+            f"'{COMPILED.as_posix()}'. The CLI args pointing to the TM file and input string will be appended to this.",
+        ),
+    ] = "",
 ):
     only_groups = only_groups or []
     try:
@@ -126,10 +145,16 @@ def test_simulators(
         raise Abort from e
 
     for submission, group in ProcessSubmissions(assignment_submissions, only_groups):
-        test_simulator_group(submission, group, client)
+        test_simulator_group(submission, group, client, build_command, run_command)
 
 
-def test_simulator_group(submission: Path, group: int, client: DockerClient) -> None:
+def test_simulator_group(
+    submission: Path,
+    group: int,
+    client: DockerClient,
+    build_command: str | None = None,
+    run_command: str | None = None,
+) -> None:
     simulator = TMSimulator.discover(submission)
     if not simulator:
         console.print(f"[error]Could not find any code files in {submission.name}[/].")
@@ -152,7 +177,7 @@ def test_simulator_group(submission: Path, group: int, client: DockerClient) -> 
             f"[info]{message_start}uilding Docker image for {simulator.language.__class__.__name__}, "
             f"this might take a bit."
         ):
-            simulator = simulator.build(client, TM_FOLDER)
+            simulator = simulator.build(client, TM_FOLDER, build_command)
     except RuntimeError as e:
         console.print("[error]Error when building submission code:[/]")
         console.print(e.args[0], highlight=False, markup=False)
@@ -160,7 +185,7 @@ def test_simulator_group(submission: Path, group: int, client: DockerClient) -> 
     with simulator:
         for tm_name, input, tm, correct in TESTS:
             try:
-                res = simulator.run(tm_name, input)
+                res = simulator.run(tm_name, input, run_command)
             except TimeoutError as e:
                 console.print(f"[warning]Simulating TM '{tm_name}' on input '{input}' ran into a timeout.")
                 res = e.args[0]
@@ -251,11 +276,12 @@ def tms(
     only_groups: Annotated[
         list[int],
         Option("--group", "-g", help="Group number to test. The default will instead test every group."),
-    ] = [], # noqa: B006
+    ] = [],  # noqa: B006
 ):
     only_groups = only_groups or []
     for folder, _ in ProcessSubmissions(assignment_submissions, only_groups):
         test_tms_single_group(folder)
+
 
 def test_tms_single_group(folder: Path):
     tm_files = [f.relative_to(folder) for f in (collect_tms(folder))]

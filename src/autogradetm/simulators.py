@@ -160,7 +160,7 @@ class TMSimulator:
                     pass
         return files
 
-    def build(self, client: DockerClient, tms_folder: Path) -> BuiltSimulator:
+    def build(self, client: DockerClient, tms_folder: Path, build_command: str | None = None) -> BuiltSimulator:
         lang = self.language
         source_mount = Mount(CODE.as_posix(), str(self.root_folder.absolute()), type="bind", read_only=False)
         tms_mount = Mount(TMS.as_posix(), str(tms_folder.absolute()), type="bind", read_only=True)
@@ -172,7 +172,11 @@ class TMSimulator:
             detach=True,
         )
         container.exec_run(f"mkdir {COMPILED.as_posix()}")
-        for command in lang.build_commands(self.files, self.entrypoint):
+        if build_command:
+            build_commands = [["bash", "-c", build_command]]
+        else:
+            build_commands = lang.build_commands(self.files, self.entrypoint)
+        for command in build_commands:
             exit_code, output = container.exec_run(command, workdir=CODE.as_posix())
             if exit_code:
                 raise RuntimeError(output.decode("utf-8"))
@@ -199,8 +203,11 @@ class BuiltSimulator(TMSimulator):
     def __exit__(self, *args: object) -> None:
         self.container.remove(force=True)
 
-    def run(self, tm_name: str, input: str) -> str:
-        command = [*self.language.run_command(self.entrypoint, self.root_folder), f"{tm_name}.TM", input]
+    def run(self, tm_name: str, input: str, run_command: str | None = None) -> str:
+        if run_command:
+            command = ["bash", "-c", f"{run_command} {tm_name}.TM {input}"]
+        else:
+            command = [*self.language.run_command(self.entrypoint, self.root_folder), f"{tm_name}.TM", input]
         _, gen = self.container.exec_run(command, workdir=TMS.as_posix(), demux=True, stream=True)
         with ThreadPoolExecutor() as exec:
             future = exec.submit(collect, gen)
