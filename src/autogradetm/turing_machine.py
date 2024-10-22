@@ -129,8 +129,8 @@ class TM:
     _cache: ClassVar[dict[str, Self]] = {}
 
     def __post_init__(self) -> None:
-        assert 1 <= self.start <= self.num_states, f"Start state {self.start} bigger than total {self.num_states}."
-        assert 1 <= self.end <= self.num_states, f"End state {self.end} bigger than total {self.num_states}"
+        assert self.start <= self.num_states, f"Start state {self.start} bigger than total {self.num_states}."
+        assert self.end <= self.num_states, f"End state {self.end} bigger than total {self.num_states}"
         assert "B" not in self.input_alphabet, f"Blank symbol in input alphabet {self.input_alphabet}"
         if not self.input_alphabet < self.tape_alphabet:
             self.tape_alphabet |= self.input_alphabet
@@ -138,9 +138,9 @@ class TM:
             self.tape_alphabet.add("B")
         for (state, symbol), (tar, write, _) in self.trans.items():
             assert state != self.end, f"Transition '{(state, symbol)}' starts from the ending state"
-            assert 1 <= state <= self.num_states, f"Transition '{(state, symbol)}' starts from a nonexistent state"
+            assert state <= self.num_states, f"Transition '{(state, symbol)}' starts from a nonexistent state"
             assert symbol in self.tape_alphabet, f"Transition '{(state, symbol)}' starts from a nonexistent symbol"
-            assert 1 <= tar <= self.num_states, f"Transition '{(state, symbol)}' goes to a nonexistent state {tar}"
+            assert tar <= self.num_states, f"Transition '{(state, symbol)}' goes to a nonexistent state {tar}"
             assert write in self.tape_alphabet, f"Transition '{(state, symbol)}' writes a nonexistent letter {write}"
 
     @classmethod
