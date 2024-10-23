@@ -76,7 +76,7 @@ def process_submissions(
     folder: Path, groups: Iterable[int] = (), *, groups_from: bool = False
 ) -> Iterator[tuple[Path, int]]:
     sorted_submissions = sorted(
-        ((f, int(f.name.split()[1].split("_")[0])) for f in folder.iterdir() if f.is_dir() or f.suffix == ".zip"),
+        ((f, int(f.name.split()[3].split("_")[0])) for f in folder.iterdir() if f.is_dir() or f.suffix == ".zip"),
         key=operator.itemgetter(1),
     )
     if groups:
