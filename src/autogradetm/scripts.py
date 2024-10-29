@@ -1,6 +1,7 @@
 import operator
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import islice, zip_longest
 from math import ceil, log2
 from pathlib import Path
@@ -14,6 +15,7 @@ from rich.prompt import Confirm, Prompt
 from rich.theme import Theme
 from typer import Abort, Argument, Option, Typer
 
+from autogradetm.ram import RAM, IfLhsNotC0, IfRhsNotConst
 from autogradetm.simulators import CODE, COMPILED, TMS, Language, TMSimulator
 from autogradetm.turing_machine import TM, TM_FOLDER, Configuration
 
@@ -220,12 +222,12 @@ def test_simulator_group(
     console.print(f"[success]Finished testing group {group}.")
 
 
-def collect_tms(path: Path) -> Iterable[Path]:
-    if path.is_file() and path.suffix == ".TM":
+def collect_suffix(path: Path, suffix: str) -> Iterable[Path]:
+    if path.is_file() and path.suffix == suffix:
         yield path
     elif path.is_dir() and not path.name.startswith(".") and path.name != "__MACOSX":
         for child in path.iterdir():
-            yield from collect_tms(child)
+            yield from collect_suffix(child, suffix)
 
 
 @dataclass
@@ -299,7 +301,7 @@ def tms(
 
 
 def test_tms_single_group(folder: Path):
-    tm_files = [f.relative_to(folder) for f in (collect_tms(folder))]
+    tm_files = [f.relative_to(folder) for f in collect_suffix(folder, ".TM")]
     for exercise in TM_EXERCISES:
         console.print(f"[header]Exercise {exercise.number}:")
         match tm_files:
@@ -369,6 +371,100 @@ def test_tms_single_group(folder: Path):
             else:
                 console.print(f"[error]The TM outputs '{output}' instead of '{exercise.format(correct)}'.")
                 console.print(format_configs(configs))
+
+
+@lru_cache
+def fibonacci(n: int) -> int:
+    if n <= 2:
+        return 1
+    else:
+        return fibonacci(n - 1) + fibonacci(n - 2)
+
+
+@app.command()
+def rams(
+    assignment_submissions: Annotated[
+        Path, Argument(help="Path to the folder containing every student's submissions.")
+    ],
+    *,
+    only_groups: Annotated[
+        list[int],
+        Option("--group", "-g", help="Group number to test. The default will instead test every group."),
+    ] = [],  # noqa: B006
+    groups_from: Annotated[
+        bool,
+        Option(
+            "--from",
+            "-f",
+            help="When used in combination with the '--group' option, setting this flag will also test groups with "
+            "bigger numbers than the specified.",
+        ),
+    ] = False,
+):
+    only_groups = only_groups or []
+    for folder, _ in process_submissions(assignment_submissions, only_groups, groups_from=groups_from):
+        files = [f.relative_to(folder) for f in collect_suffix(folder, ".txt")]
+        match files:
+            case []:
+                console.print("[error]Could not find any RAM specification files.")
+                continue
+            case [ram_file]:
+                pass
+            case _:
+                parents = {p.parent for p in files}
+                if len(parents) == 1:
+                    parent = next(iter(parents))
+                    paths = [p.name for p in files]
+                else:
+                    parent = None
+                    paths = [str(p) for p in files]
+
+                ret = Prompt.ask(
+                    "[warning]Could not uniquely identify a RAM specifiction file for this group.[/]\n"
+                    "Please select the correct file manually or skip this group",
+                    choices=["Skip", *paths],
+                    show_choices=True,
+                    default="Skip",
+                    console=console,
+                )
+                if ret == "Skip":
+                    console.print("Skipping this group.")
+                    continue
+                else:
+                    ram_file = parent.joinpath(ret) if parent else Path(ret)
+        console.print(f"Using RAM specification file '{ram_file}'.")
+
+        try:
+            ram, warnings = RAM.from_program(folder.joinpath(ram_file).read_text().upper())
+        except (ValueError, AssertionError) as e:
+            console.print(f"[error]The RAM file is formatted incorrectly:[/]\n{e}")
+            continue
+        if warnings:
+            console.print("[warning]The RAM is not specified correctly:[/]")
+            for warning in warnings:
+                if isinstance(warning, IfLhsNotC0):
+                    console.print(f"An IF statement doesn't use 'c(0)' as its left-hand side:\n{warning.args[0]}")
+                elif isinstance(warning, IfRhsNotConst):
+                    console.print(f"An IF statement doesn't use a constant as its right-hand side:\n{warning.args[0]}")
+
+        for n in range(1, 6):
+            try:
+                res = ram.run(n)
+            except ValueError as e:
+                console.print(f"[error]Error when calculating F({n}):[/]\n{e}")
+                continue
+            except TimeoutError:
+                console.print(f"[error]RAM runs in an infinite loop when calculating F({n}).")
+                continue
+            correct = fibonacci(n)
+            if res[1] == correct:
+                console.print(f"[success]RAM calculates F({n}) correctly.")
+            else:
+                lines = "\n".join(f"{k}: {v}" for k, v in sorted(res.items(), key=operator.itemgetter(0)))
+                console.print(
+                    f"[error]RAM computes F({n}) as {res[1]} instead of {correct}.[/]\n"
+                    f"Full register contents are:\n{lines}"
+                )
 
 
 if __name__ == "__main__":
