@@ -74,11 +74,19 @@ def get_diff(correct: list[Configuration], err: list[Configuration]) -> str:
     return truncate(res)
 
 
+def parse_group(folder_name: str) -> int:
+    parts = folder_name.split()
+    if parts[0] == "gruppe":
+        return int(parts[1])
+    else:
+        return int(parts[3].split("_")[0])
+
+
 def process_submissions(
     folder: Path, groups: Iterable[int] = (), *, groups_from: bool = False
 ) -> Iterator[tuple[Path, int]]:
     sorted_submissions = sorted(
-        ((f, int(f.name.split()[3].split("_")[0])) for f in folder.iterdir() if f.is_dir() or f.suffix == ".zip"),
+        ((f, parse_group(f.name)) for f in folder.iterdir() if f.is_dir() or f.suffix == ".zip"),
         key=operator.itemgetter(1),
     )
     if groups:
